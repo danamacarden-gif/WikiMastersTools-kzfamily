@@ -519,7 +519,6 @@
         for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) {
           document.addEventListener(type, unlockAudio, true);
         }
-        unlockAudio();
 
         tickTimer = setInterval(tick, 1000);
         refresh();
