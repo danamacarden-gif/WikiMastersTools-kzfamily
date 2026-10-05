@@ -95,9 +95,68 @@
       }
 
       function writeFamilies(families) {
-        if (!writeLocalValue(STORAGE_KEY, families)) {
-          throw new Error('Impossible d’enregistrer les Familles dans le stockage local du navigateur.');
+        if (writeLocalValue(STORAGE_KEY, families)) return;
+
+        // localStorage is shared with disposable extension caches. Large price/image
+        // caches can exhaust the browser quota even though the Families payload is
+        // relatively small. Families are user-created data, so preserve them and
+        // evict expendable caches progressively before giving up.
+        const removable = [];
+
+        try {
+          for (let index = 0; index < localStorage.length; index += 1) {
+            const key = localStorage.key(index);
+            if (!key || key === STORAGE_KEY) continue;
+
+            const isPriceCache = /^wm_avg_v[123]_/.test(key);
+            const isMissingImageCache = key.startsWith('wm_missing_img_v2_');
+            if (!isPriceCache && !isMissingImageCache) continue;
+
+            let timestamp = 0;
+            try {
+              const value = JSON.parse(localStorage.getItem(key) || 'null');
+              timestamp = Number(
+                value?.fetchedAt ??
+                value?.checkedAt ??
+                value?.updatedAt ??
+                value?.createdAt
+              ) || 0;
+            } catch (_) {}
+
+            removable.push({
+              key,
+              timestamp,
+              priority: isPriceCache ? 0 : 1
+            });
+          }
+
+          removable.sort((a, b) =>
+            a.priority - b.priority ||
+            a.timestamp - b.timestamp
+          );
+
+          const BATCH_SIZE = 25;
+
+          for (let offset = 0; offset < removable.length; offset += BATCH_SIZE) {
+            const batch = removable.slice(offset, offset + BATCH_SIZE);
+            for (const entry of batch) {
+              localStorage.removeItem(entry.key);
+            }
+
+            if (writeLocalValue(STORAGE_KEY, families)) {
+              console.info(
+                `[WM Average] quota localStorage libéré pour les Familles (${Math.min(offset + BATCH_SIZE, removable.length)} cache(s) supprimé(s))`
+              );
+              return;
+            }
+          }
+        } catch (error) {
+          console.debug('[WM Average] nettoyage quota Familles impossible', error);
         }
+
+        throw new Error(
+          'Impossible d’enregistrer les Familles : le stockage local du navigateur est plein.'
+        );
       }
 
       function getFamily(id) {
