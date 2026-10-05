@@ -170,14 +170,21 @@
           const pageSize = firstCards.length;
           const pages = [firstCards];
 
-          const totalPages = Number.isFinite(total) && total > 0 && pageSize > 0
-            ? Math.ceil(total / pageSize)
-            : 1;
+          const hasReliableTotal = Number.isFinite(total) && total > 0 && pageSize > 0;
+          const maxPageExclusive = hasReliableTotal
+            ? Math.min(Math.ceil(total / pageSize), MAX_COLLECTION_PAGES)
+            : MAX_COLLECTION_PAGES;
 
-          for (let page = 1; page < Math.min(totalPages, MAX_COLLECTION_PAGES); page += 1) {
-            const cards = extractCards(await fetchCollectionPage(page, false, { tagId }));
-            pages.push(cards);
-            if (cards.length < pageSize) break;
+          // Certaines réponses filtrées par étiquette n'exposent pas `total`.
+          // Dans ce cas, ne surtout pas supposer qu'il n'existe qu'une seule page
+          // (50 cartes) : on continue jusqu'à la première page incomplète/vide.
+          if (pageSize > 0) {
+            for (let page = 1; page < maxPageExclusive; page += 1) {
+              const cards = extractCards(await fetchCollectionPage(page, false, { tagId }));
+              pages.push(cards);
+
+              if (!cards.length || cards.length < pageSize) break;
+            }
           }
 
           window.dispatchEvent(new CustomEvent('wm-average-tag-cards', {
