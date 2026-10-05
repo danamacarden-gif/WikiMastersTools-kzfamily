@@ -682,8 +682,8 @@
           UR: '/ultra_rare.png',
           SR: '/super_rare.png',
           R: '/rare.png',
-          PC: '/peu_commune.png',
-          C: '/commune.png'
+          PC: '/peu_commun.png',
+          C: '/commun.png'
         };
 
         const card = document.createElement('div');
