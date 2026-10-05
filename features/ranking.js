@@ -113,7 +113,19 @@
 
         for (const card of cardMetaById.values()) {
           if (!card?.id || !card?.title) continue;
+
           const previous = knownCards.get(card.id);
+          const hasOwnershipEvidence =
+            Boolean(card.ownedCardId) ||
+            (Array.isArray(card.ownedCardIds) && card.ownedCardIds.length > 0);
+
+          // cardMetaById is shared by several features (collection, marketplace,
+          // packs, trades...). A marketplace card viewed during the session must
+          // never become a collection candidate just because its price was cached.
+          // Existing persisted collection cards are still allowed to absorb fresher
+          // metadata, while new session-only cards need proof that they are owned.
+          if (!previous && !hasOwnershipEvidence) continue;
+
           knownCards.set(card.id, previous ? mergeKnownCard(previous, card) : { ...card });
         }
 
