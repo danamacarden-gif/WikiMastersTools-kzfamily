@@ -33,187 +33,30 @@
       let autoOpenToggleInput = null;
       let autoOpenToggleLabel = null;
 
-      const acknowledgedChecks = new WeakSet();
-
-      const uiResponseProfile = {
-        responsePace: 1 + Math.random() * 1.4,
-        deliberation: 0.55 + Math.random() * 1.15,
-        settleDelay: 300 + Math.random() * 1500
-      };
+      let confirmationPending = false;
+      let openAllProgressLabel = null;
+      let openAllTotalPacks = null;
 
       if (!runtime.settings.isEnabled('autoOpen')) {
         writeLocalValue(AUTO_OPEN_ENABLED_KEY, false);
         localStorage.removeItem(AUTO_OPEN_NEXT_AT_KEY);
       }
 
-      function lognormalSample(mu, sigma) {
-        // Box-Muller sur loi normale, puis exponentielle => lognormale.
-        let u = 0;
-        let v = 0;
-        while (u === 0) u = Math.random();
-        while (v === 0) v = Math.random();
-        const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-        return Math.exp(mu + sigma * z);
-      }
+      // Le widget de vérification du site reste une interaction explicite de l'utilisateur.
 
-      function humanDelay(muMs, sigma, minMs, maxMs, multiplier = 1) {
-        const raw = lognormalSample(Math.log(muMs), sigma) * multiplier;
-        return Math.min(maxMs, Math.max(minMs, raw));
-      }
-
-      // Active la case de confirmation de la façon la plus naturelle possible :
-      // le focus arrive juste avant l'activation (pointeur ou Tab), et la cible
-      // du clic varie — une partie des utilisateurs clique sur le libellé plutôt
-      // que sur la case elle-même.
-      function humanActivateCheckbox(checkbox) {
-        const label = checkbox.closest('label');
-        const target = (label && Math.random() < 0.25) ? label : checkbox;
-
-        if (Math.random() < 0.96) {
-          try { checkbox.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+      function stopOpening() {
+        if (!openAllActive) return;
+        if (autoOpenRequestId === openAllRequestId) {
+          autoOpenEnabled = false;
+          autoOpenShowSummaryAfterCurrent = true;
+          writeLocalValue(AUTO_OPEN_ENABLED_KEY, false);
+          localStorage.removeItem(AUTO_OPEN_NEXT_AT_KEY);
+          clearAutoOpenTimer();
+          updateAutoOpenToggleUi();
         }
-
-        target.click();
-      }
-
-      // Valide le bouton après activation de la case : focus d'abord, puis une
-      // dernière hésitation avant le clic final.
-      function humanConfirmButton(button) {
-        if (!button.isConnected || button.disabled) return;
-
-        if (Math.random() < 0.85) {
-          try { button.focus({ preventScroll: true }); } catch (_) { /* noop */ }
-        }
-
-        const deliberationMs = humanDelay(650, 0.65, 180, 4200, uiResponseProfile.deliberation);
-        setTimeout(() => {
-          if (button.isConnected && !button.disabled) button.click();
-        }, deliberationMs);
-      }
-
-      function isElementEffectivelyVisible(element) {
-        if (!element?.isConnected) return false;
-        if (document.visibilityState !== 'visible') return false;
-
-        const rect = element.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return false;
-
-        const style = window.getComputedStyle(element);
-        if (style.visibility === 'hidden' || style.display === 'none') return false;
-
-        // Au moins partiellement dans le viewport.
-        return rect.bottom > 0 && rect.right > 0 &&
-          rect.top < window.innerHeight && rect.left < window.innerWidth;
-      }
-
-      // Attend qu'une condition soit vraie en sondant à intervalle irrégulier
-      // pour éviter de surcharger le thread principal pendant les animations.
-      function waitFor(condition, { timeoutMs = 15000, onDone } = {}) {
-        const startedAt = Date.now();
-
-        const probe = () => {
-          if (condition()) {
-            onDone(true);
-            return;
-          }
-
-          if (Date.now() - startedAt > timeoutMs) {
-            onDone(false);
-            return;
-          }
-
-          setTimeout(probe, 90 + Math.random() * 160);
-        };
-
-        setTimeout(probe, 90 + Math.random() * 160);
-      }
-
-      function locatePendingConsent() {
-        if (!isPullsPage()) return null;
-
-        // Le champ "website" est un honeypot invisible : il sert uniquement
-        // de repère pour retrouver le widget. Il ne doit jamais être manipulé.
-        for (const honeypot of document.querySelectorAll('input[name="website"]')) {
-          const hiddenLabel = honeypot.closest('label');
-          const block = hiddenLabel?.parentElement;
-          if (!block) continue;
-
-          const checkbox = [...block.querySelectorAll('input[type="checkbox"]')]
-            .find((input) => !input.closest('.wm-pulls-tools'));
-          if (!checkbox) continue;
-
-          const button = [...block.querySelectorAll('button')]
-            .find((candidate) =>
-              normalizeTitle(candidate.textContent).toLocaleLowerCase('fr') === 'continuer'
-            ) || block.querySelector('button');
-          if (!button) continue;
-
-          return { block, checkbox, button };
-        }
-
-        return null;
-      }
-
-      function restoreAcknowledgedConsent() {
-        const verification = locatePendingConsent();
-        if (!verification || acknowledgedChecks.has(verification.block)) return;
-
-        acknowledgedChecks.add(verification.block);
-        const { block, checkbox, button } = verification;
-
-        // Séquence de restauration d'une préférence mémorisée :
-        // 1. stabilisation de l'interface (bloc fraîchement monté) ~0.3 – 1.8 s
-        // 2. relecture du libellé avant de cocher                  ~1.2 – 9 s (lognormal)
-        // 3. restauration de l'état de la case (focus puis clic)
-        // 4. délibération avant de valider                         ~0.2 – 4 s (lognormal)
-        // 5. clic sur « Continuer »
-        const settleMs = uiResponseProfile.settleDelay;
-        const readingDelay = humanDelay(2400, 0.55, 1200, 9000, uiResponseProfile.responsePace);
-
-        setTimeout(() => {
-          // On ne restaure rien tant que le bloc n'est pas réellement visible et
-          // que l'onglet n'a pas le focus (évite les interactions perdues).
-          waitFor(() => isElementEffectivelyVisible(block), {
-            onDone: (visible) => {
-              if (!visible || !checkbox.isConnected) return;
-
-              setTimeout(() => {
-                if (!checkbox.isConnected) return;
-
-                // Une petite distraction occasionnelle avant de confirmer —
-                // notification, coup d'œil ailleurs — puis on s'y remet.
-                const commit = () => {
-                  if (!checkbox.isConnected || !button.isConnected) return;
-
-                  if (!checkbox.checked) {
-                    humanActivateCheckbox(checkbox);
-                  }
-
-                  // React peut laisser le bouton disabled pendant quelques ticks.
-                  // On attend qu'il soit réellement cliquable avant de valider.
-                  waitFor(() => (
-                    checkbox.isConnected &&
-                    button.isConnected &&
-                    checkbox.checked &&
-                    !button.disabled
-                  ), {
-                    timeoutMs: 5000,
-                    onDone: (ready) => {
-                      if (!ready) return;
-                      humanConfirmButton(button);
-                    }
-                  });
-                };
-
-                if (Math.random() < 0.05) {
-                  setTimeout(commit, humanDelay(6000, 0.6, 3000, 30000));
-                } else {
-                  commit();
-                }
-              }, readingDelay);
-            }
-          });
-        }, settleMs);
+        window.dispatchEvent(new CustomEvent('wm-average-cancel-open-all-packs', {
+          detail: { requestId: openAllRequestId }
+        }));
       }
 
       function readAutoOpenSession() {
@@ -252,7 +95,7 @@
 
       function getAutoOpenDelayBounds() {
         const normalizeMinutes = (value, fallback) => {
-          const numeric = Math.round(Number(value));
+          const numeric = value == null || value === '' ? NaN : Math.round(Number(value));
           if (!Number.isFinite(numeric)) return fallback;
           return Math.max(1, Math.min(10080, numeric));
         };
@@ -338,7 +181,7 @@
         if (cards.length || openedPacks > 0) {
           session.cards.push(...cards);
           session.openedPacks += openedPacks;
-          session.runs += 1;
+          if (detail?.countRun !== false) session.runs += 1;
         }
 
         if (!detail?.ok && detail?.error) {
@@ -389,6 +232,7 @@
 
         if (autoOpenRequestId && openAllActive && openAllRequestId === autoOpenRequestId) {
           autoOpenShowSummaryAfterCurrent = showSummary;
+          stopOpening();
           return;
         }
 
@@ -417,6 +261,8 @@
         openAllError = null;
         openAllRequestId = `${automatic ? 'auto-packs' : 'packs'}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
 
+        openAllTotalPacks = null;
+        setOpenAllProgress(0);
         if (automatic) {
           autoOpenRequestId = openAllRequestId;
         }
@@ -437,7 +283,7 @@
       }
 
       async function runAutomaticOpen() {
-        if (!autoOpenEnabled) return;
+        if (!autoOpenEnabled || readLocalValue(AUTO_OPEN_ENABLED_KEY) !== true || !runtime.settings.isEnabled('autoOpen')) return;
 
         localStorage.removeItem(AUTO_OPEN_NEXT_AT_KEY);
 
@@ -453,9 +299,10 @@
       }
 
       function showAutoOpenHelp() {
+        const { minDelay, maxDelay } = getAutoOpenDelayBounds();
         runtime.modalUi.showInfoModal(
           'Ouverture automatique',
-          'Quand cette option est activée, l’extension attend aléatoirement entre 20 et 100 minutes puis utilise « Tout ouvrir » pour ouvrir tous les paquets disponibles. Les récaps intermédiaires restent masqués et le cycle recommence automatiquement. Quand vous désactivez l’option, un récapitulatif cumulé de toutes les cartes ouvertes automatiquement s’affiche. Les ouvertures sont espacées et aléatoires, il n\'y a aucune différence entre avoir cela activé et mettre un réveil toutes les x minutes, les requetes au serveur sont les mêmes. WikiMasters doit rester ouvert dans au moins un onglet pour que l’automatisation puisse s’exécuter.'
+          `L’extension attend entre ${minDelay / 60000} et ${maxDelay / 60000} minutes, puis ouvre les paquets disponibles. WikiMasters doit rester ouvert. Un seul onglet peut ouvrir des paquets à la fois. Désactiver l’option arrête le lot après le paquet en cours et affiche le récapitulatif cumulé. Les vérifications du site restent à valider manuellement.`
         );
       }
 
@@ -578,6 +425,14 @@
           info.append(openAllButton);
         }
 
+        openAllProgressLabel = document.createElement('span');
+        openAllProgressLabel.className = 'wm-open-all-progress';
+        openAllProgressLabel.setAttribute('role', 'status');
+        openAllProgressLabel.setAttribute('aria-live', 'polite');
+        openAllProgressLabel.hidden = !openAllActive;
+        info.append(openAllProgressLabel);
+        if (openAllActive) setOpenAllProgress(openAllOpenedPacks);
+
         if (
           runtime.settings.isEnabled('packRecap') ||
           runtime.settings.isEnabled('openAll') ||
@@ -640,28 +495,29 @@
       }
 
       async function handleOpenAllPacksClick() {
-        if (openAllActive) return;
-
-        const confirmed = await showOpenAllConfirmation();
-        if (!confirmed) return;
-
-        startOpenAllPacks({ automatic: false });
-      }
-
-      function setOpenAllButtonProgress(openedPacks, packsRemaining = null) {
-        if (!openAllButton) return;
-
-        if (Number.isFinite(Number(packsRemaining))) {
-          openAllButton.textContent = `Ouverts ${openedPacks} • reste ${Number(packsRemaining)}`;
-        } else {
-          openAllButton.textContent = `Ouverts ${openedPacks}`;
+        if (openAllActive || confirmationPending) return;
+        confirmationPending = true;
+        try {
+          const confirmed = await showOpenAllConfirmation();
+          if (confirmed) startOpenAllPacks({ automatic: false });
+        } finally {
+          confirmationPending = false;
         }
       }
 
-      function setOpenAllButtonWaiting(waitMs) {
-        if (!openAllButton) return;
-        const seconds = Math.max(1, Math.ceil(Number(waitMs || 0) / 1000));
-        openAllButton.textContent = `Attente ${seconds}s…`;
+      function setOpenAllProgress(openedPacks, packsRemaining = null, waitMs = null) {
+        if (packsRemaining != null && Number.isInteger(Number(packsRemaining)) && Number(packsRemaining) >= 0) {
+          const total = openedPacks + Number(packsRemaining);
+          openAllTotalPacks = Math.max(openAllTotalPacks || 0, total);
+        }
+        if (!openAllProgressLabel) return;
+        openAllProgressLabel.hidden = !openAllActive;
+        openAllProgressLabel.textContent = openAllTotalPacks != null
+          ? `${openedPacks}/${openAllTotalPacks} ouverts`
+          : `${openedPacks} ouverts`;
+        openAllProgressLabel.title = waitMs != null
+          ? `Reprise dans ${Math.max(1, Math.ceil(Number(waitMs) / 1000))} s`
+          : '';
       }
 
       function scheduleOpenAllSummaryRender() {
@@ -874,7 +730,6 @@
         storageSet({
           [ALL_COLLECTION_KEY]: {
             ...entry,
-            fetchedAt: Date.now(),
             cards: [...byId.values()]
           }
         });
@@ -895,9 +750,14 @@
           return;
         }
 
+        const signature = JSON.stringify(activePackRecap.cards.map((card) => [
+          card.id, card.rarity, cacheMemory.get(card.id)
+        ]));
+        if (existing?.dataset.signature === signature) return;
         const panel = existing || document.createElement('aside');
         panel.id = 'wm-pack-recap';
         panel.className = 'wm-pack-recap';
+        panel.dataset.signature = signature;
         panel.replaceChildren();
 
         const header = document.createElement('div');
@@ -1027,21 +887,22 @@
         const detail = event.detail || {};
         if (!openAllActive || detail.requestId !== openAllRequestId) return;
 
+        const previousOpenedPacks = openAllOpenedPacks;
         openAllOpenedPacks = Number(detail.openedPacks) || 0;
 
-        if (detail.waiting) {
-          setOpenAllButtonWaiting(detail.waitMs);
-          return;
-        }
-
-        setOpenAllButtonProgress(openAllOpenedPacks, detail.packsRemaining);
+        setOpenAllProgress(openAllOpenedPacks, detail.packsRemaining, detail.waiting ? detail.waitMs : null);
+        if (detail.waiting) return;
 
         const packCards = Array.isArray(detail.cards) ? detail.cards : [];
-        if (!packCards.length) return;
+        if (!packCards.length || openAllOpenedPacks <= previousOpenedPacks) return;
 
         runtime.pullStats.recordPullStats(packCards);
         openAllSummaryCards.push(...packCards);
         mergePulledCardsIntoCollectionCache(packCards);
+        // Sauvegarder à chaque paquet permet de retrouver la session après un rechargement.
+        if (autoOpenRequestId === openAllRequestId) {
+          appendAutomaticOpenResult({ ok: true, openedPacks: 1, cards: packCards, countRun: false });
+        }
 
         const uniquePackCards = [...new Map(packCards.map((card) => [card.id, card])).values()];
         try {
@@ -1059,6 +920,7 @@
 
         openAllActive = false;
         openAllRequestId = null;
+        if (openAllProgressLabel) openAllProgressLabel.hidden = true;
 
         if (openAllButton?.isConnected) {
           openAllButton.disabled = false;
@@ -1071,7 +933,12 @@
         if (wasAutomatic) {
           autoOpenRequestId = null;
 
-          appendAutomaticOpenResult(detail);
+          if (openedPacks > 0) {
+            const session = readAutoOpenSession();
+            session.runs += 1;
+            writeAutoOpenSession(session);
+          }
+          if (!detail.ok && detail.error) appendAutomaticOpenResult({ ok: false, error: detail.error });
           document.getElementById('wm-open-all-overlay')?.remove();
           document.getElementById('wm-pack-recap')?.remove();
           openAllSummaryCards = [];
@@ -1094,11 +961,9 @@
           return;
         }
 
-        openOpenAllSummary(
-          cards,
-          openedPacks,
-          detail.ok ? null : `Ouverture interrompue : ${detail.error || 'erreur inconnue'}`
-        );
+        const message = detail.cancelled ? 'Ouverture arrêtée. Les cartes déjà obtenues sont conservées.'
+          : (detail.ok ? null : `Ouverture interrompue : ${detail.error || 'erreur inconnue'}`);
+        openOpenAllSummary(cards, openedPacks, message);
       });
 
       window.addEventListener('wm-average-pack-opened', (event) => {
@@ -1113,13 +978,29 @@
         if (openAllSummaryCards.some((card) => card.id === id)) scheduleOpenAllSummaryRender();
       }
 
+      window.addEventListener('storage', (event) => {
+        if (event.key === AUTO_OPEN_ENABLED_KEY) {
+          autoOpenEnabled = readLocalValue(AUTO_OPEN_ENABLED_KEY) === true;
+          updateAutoOpenToggleUi();
+          if (!autoOpenEnabled) {
+            clearAutoOpenTimer();
+            if (autoOpenRequestId) stopOpening();
+          } else {
+            scheduleNextAutoOpen({ keepExisting: true });
+          }
+        }
+        if (event.key === AUTO_OPEN_NEXT_AT_KEY && autoOpenEnabled && event.newValue != null) {
+          scheduleNextAutoOpen({ keepExisting: true });
+        }
+      });
+
       function isAutoOpenEnabled() {
         return runtime.settings.isEnabled('autoOpen') && autoOpenEnabled;
       }
 
       return {
         ensurePullsToolbar, updateAutoOpenToggleUi, renderPackRecap,
-        restoreAcknowledgedConsent, scheduleNextAutoOpen, onPriceUpdated,
+        scheduleNextAutoOpen, onPriceUpdated,
         isAutoOpenEnabled
       };
     }

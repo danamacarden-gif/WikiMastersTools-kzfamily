@@ -85,7 +85,7 @@
       function isPacksOpenApi(url) {
         try {
           const parsed = new URL(url, location.origin);
-          return parsed.pathname === '/api/packs/open';
+          return parsed.origin === location.origin && parsed.pathname === '/api/packs/open';
         } catch (_) {
           return false;
         }
@@ -365,13 +365,16 @@
 
       async function fetchJsonRetry(url, options = {}, {
         label = 'Requête',
-        maxAttempts = 3
+        maxAttempts = 3,
+        timeoutMs = 15000
       } = {}) {
         let lastError = null;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), timeoutMs);
           try {
-            const response = await originalFetch(url, options);
+            const response = await originalFetch(url, { ...options, signal: options.signal || controller.signal });
 
             if (response.ok) {
               return await response.json();
@@ -393,6 +396,8 @@
             if (!retryable || attempt >= maxAttempts) {
               throw error;
             }
+          } finally {
+            clearTimeout(timeout);
           }
 
           const delayMs = Math.min(1800, 300 * (2 ** (attempt - 1)));

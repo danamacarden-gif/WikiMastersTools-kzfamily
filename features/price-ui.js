@@ -90,15 +90,16 @@
       }
 
       function chooseAverage(cacheEntry, cardEl, explicitRarity = null) {
+        if (cacheEntry?.ok === false) return null;
         const rarity = explicitRarity || getRarityFromCard(cardEl);
         const averages = cacheEntry?.averages || {};
-        if (rarity && Number.isFinite(Number(averages[rarity]))) {
-          return Number(averages[rarity]);
-        }
-
-        const values = Object.values(averages)
-          .map(Number)
-          .filter(Number.isFinite);
+        const validPrice = (value) => (
+          (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')) &&
+          Number.isFinite(Number(value)) && Number(value) >= 0
+        );
+        // Une rareté connue doit toujours utiliser sa propre moyenne.
+        if (rarity) return validPrice(averages[rarity]) ? Number(averages[rarity]) : null;
+        const values = Object.values(averages).filter(validPrice).map(Number);
         return values.length === 1 ? values[0] : null;
       }
 
@@ -125,7 +126,7 @@
         }
 
         badge.title = 'Prix moyen des ventes (cache 24 h)';
-        const average = chooseAverage(cacheEntry, card, cardMetaById.get(id)?.rarity || null);
+        const average = chooseAverage(cacheEntry, card, getRarityFromCard(card) || cardMetaById.get(id)?.rarity || null);
 
         if (average == null) {
           if (badge.className !== 'wm-average-badge wm-average-empty') {
@@ -206,9 +207,9 @@
       function renderOne(id) {
         if (!isCollectionPage()) return;
 
-        const direct = document.querySelector(`[data-wm-card-id="${CSS.escape(id)}"]`);
-        if (direct) {
-          renderCollectionCard(id, direct);
+        const direct = document.querySelectorAll(`[data-wm-card-id="${CSS.escape(id)}"]`);
+        if (direct.length) {
+          for (const card of direct) renderCollectionCard(id, card);
           return;
         }
 
@@ -443,6 +444,7 @@
         const card = event.detail?.card;
         if (!card?.id || !card?.title) return;
 
+        if (!isMarketplaceDetailPage() || event.detail?.auctionId !== location.pathname.split('/')[2]) return;
         marketplaceCardId = card.id;
         marketplaceRequestedPath = location.pathname;
         marketplaceRequestedAt = Date.now();
@@ -480,6 +482,10 @@
 
         if (!isMarketplaceDetailPage()) return;
 
+        if (marketplaceRequestedPath !== location.pathname) {
+          marketplaceCardId = null;
+          document.getElementById('wm-marketplace-average')?.remove();
+        }
         if (marketplaceCardId) {
           renderMarketplaceAverage(marketplaceCardId);
           return;

@@ -29,7 +29,6 @@
           runtime.packs.updateAutoOpenToggleUi();
           runtime.pullStats.renderPullStats();
           runtime.packs.renderPackRecap();
-          runtime.packs.restoreAcknowledgedConsent();
         }
 
         if (isTradesPage()) {

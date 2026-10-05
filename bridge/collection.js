@@ -73,53 +73,12 @@
       }
 
       async function fetchCollectionPage(page, stats = false, { tagId = null, sort = 'rarity' } = {}) {
-        let attempt = 0;
         const tagQuery = tagId ? `&tag_id=${encodeURIComponent(tagId)}` : '';
-
-        while (true) {
-          attempt += 1;
-
-          try {
-            const response = await originalFetch(
-              `/api/my-collection?sort=${encodeURIComponent(sort)}${tagQuery}&page=${encodeURIComponent(page)}&stats=${stats ? 1 : 0}`,
-              {
-                method: 'GET',
-                credentials: 'include',
-                headers: { accept: '*/*' }
-              }
-            );
-
-            if (response.ok) {
-              return response.json();
-            }
-
-            const retryable = response.status >= 500 && response.status <= 599;
-            if (!retryable) {
-              throw new Error(`Collection page ${page}: HTTP ${response.status}`);
-            }
-
-            console.warn(
-              `[WM Average] Collection page ${page}: HTTP ${response.status}, retry ${attempt}`
-            );
-          } catch (error) {
-            const statusMatch = String(error?.message || '').match(/HTTP\s+(\d+)/);
-            const status = statusMatch ? Number(statusMatch[1]) : null;
-            const retryable =
-              status == null ||
-              (status >= 500 && status <= 599);
-
-            if (!retryable) {
-              throw error;
-            }
-
-            console.warn(
-              `[WM Average] Collection page ${page}: erreur réseau, retry ${attempt}`
-            );
-          }
-
-          const delayMs = Math.min(5000, 500 * (2 ** Math.min(attempt - 1, 4)));
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-        }
+        return fetchJsonRetry(
+          `/api/my-collection?sort=${encodeURIComponent(sort)}${tagQuery}&page=${encodeURIComponent(page)}&stats=${stats ? 1 : 0}`,
+          { method: 'GET', credentials: 'include', headers: { accept: '*/*' } },
+          { label: `Collection page ${page}`, maxAttempts: 3, timeoutMs: 15000 }
+        );
       }
 
       function dedupeCards(pages) {

@@ -111,7 +111,7 @@
 
       function normalizeAutoOpenInterval(minValue, maxValue) {
         const clampMinutes = (value, fallback) => {
-          const numeric = Math.round(Number(value));
+          const numeric = value == null || value === '' ? NaN : Math.round(Number(value));
           if (!Number.isFinite(numeric)) return fallback;
           return Math.max(1, Math.min(10080, numeric));
         };

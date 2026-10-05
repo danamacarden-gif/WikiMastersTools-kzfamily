@@ -8,7 +8,7 @@
       const CACHE_CLEANUP_INTERVAL = 24 * 60 * 60 * 1000;
       const CACHE_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
       const CACHE_CLEANUP_KEY = 'wm_avg_cache_cleanup_v1';
-      const CACHE_PREFIX = 'wm_avg_v3_';
+      const CACHE_PREFIX = 'wm_avg_v4_';
       const MAX_CONCURRENT = 3;
       const BULK_RARITY_LAST_LOAD_KEY = 'wm_bulk_rarity_last_load_v1';
       const ALL_COLLECTION_KEY = 'wm_all_collection_v1';
@@ -132,9 +132,13 @@
       }
 
       function isCacheEntryValid(entry, now = Date.now()) {
-        if (!entry || !Number.isFinite(Number(entry.fetchedAt))) return false;
-        const ttl = entry.ok === false ? ERROR_CACHE_TTL : CACHE_TTL;
-        return now - Number(entry.fetchedAt) < ttl;
+        if (!entry || typeof entry.ok !== 'boolean' || !Number.isFinite(entry.fetchedAt)) return false;
+        if (!entry.averages || typeof entry.averages !== 'object' || Array.isArray(entry.averages)) return false;
+        const ttl = entry.ok === false
+          ? Math.min(5 * 60 * 1000, Math.max(ERROR_CACHE_TTL, Number(entry.retryAfterMs) || 0))
+          : CACHE_TTL;
+        const age = now - entry.fetchedAt;
+        return age >= 0 && age < ttl;
       }
 
       function cleanupPriceCacheOnceDaily() {
@@ -149,7 +153,7 @@
             const key = localStorage.key(index);
             if (!key) continue;
 
-            if (/^wm_avg_v[12]_/.test(key)) {
+            if (/^wm_avg_v[123]_/.test(key)) {
               keysToRemove.push(key);
               continue;
             }

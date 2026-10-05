@@ -884,6 +884,18 @@
   font-size: 11px;
 }
 
+.wm-open-all-progress {
+  margin-top: 3px;
+  color: rgba(226, 232, 240, 0.8);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.wm-open-all-progress[hidden] {
+  display: none;
+}
+
 .wm-open-all-modal {
   width: min(760px, calc(100vw - 28px));
   max-height: min(88vh, 900px);

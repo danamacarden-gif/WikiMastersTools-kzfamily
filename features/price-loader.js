@@ -17,6 +17,8 @@
       let activeRequests = 0;
       let bulkBatchActive = false;
       let bulkTotal = 0;
+      let cooldownUntil = 0;
+      let cooldownTimer = null;
 
       function notifyBulkProgress() {
         runtime.collectionBulk?.updateBulkProgress(bulkTotal, bulkPendingIds.size);
@@ -24,6 +26,7 @@
 
       function loadCacheForCards(cards, { forceRarities = null, markBulk = false } = {}) {
         registerCards(cards);
+        cards = [...new Map(cards.filter((card) => card?.id && card?.title).map((card) => [card.id, card])).values()];
 
         for (const card of cards) {
           const forceCard = Boolean(forceRarities?.has(card.rarity));
@@ -60,7 +63,7 @@
         if (markBulk) notifyBulkProgress();
         pumpQueue();
 
-        if (markBulk && bulkPendingIds.size === 0) {
+        if (markBulk && bulkBatchActive && bulkPendingIds.size === 0) {
           bulkBatchActive = false;
           runtime.collectionBulk.finishBulkLoad();
         }
@@ -78,6 +81,13 @@
       }
 
       function pumpQueue() {
+        if (Date.now() < cooldownUntil) {
+          if (!cooldownTimer) cooldownTimer = setTimeout(() => {
+            cooldownTimer = null;
+            pumpQueue();
+          }, cooldownUntil - Date.now());
+          return;
+        }
         while (activeRequests < MAX_CONCURRENT && queued.length > 0) {
           const id = queued.shift();
           queuedIds.delete(id);
@@ -96,7 +106,10 @@
         inFlightIds.add(id);
 
         const requestId = `${id}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-        pendingByRequestId.set(requestId, id);
+        const timer = setTimeout(() => finishRequest({
+          requestId, id, ok: false, error: 'Délai de chargement des prix dépassé'
+        }), 45000);
+        pendingByRequestId.set(requestId, { id, timer });
 
         window.dispatchEvent(new CustomEvent('wm-average-request', {
           detail: { id, requestId }
@@ -104,8 +117,11 @@
       }
 
       function finishRequest(detail) {
-        const id = pendingByRequestId.get(detail.requestId) || detail.id;
-        if (!id) return;
+        const pending = pendingByRequestId.get(detail.requestId);
+        // Une réponse tardive ou inconnue ne doit pas libérer un autre emplacement.
+        if (!pending) return;
+        const { id, timer } = pending;
+        clearTimeout(timer);
 
         pendingByRequestId.delete(detail.requestId);
         inFlightIds.delete(id);
@@ -125,9 +141,16 @@
           idByTitle.set(normalizeTitle(detail.title), id);
         }
 
+        if (detail.rateLimited) {
+          cooldownUntil = Math.max(cooldownUntil, Date.now() + entry.retryAfterMs);
+        }
         cacheMemory.set(id, entry);
         storageSet({ [cacheKey(id)]: entry });
-        runtime.priceUi.renderKnownCard(id);
+        try {
+          runtime.priceUi.renderKnownCard(id);
+        } catch (error) {
+          reportError('rendu prix', error);
+        }
 
         if (bulkPendingIds.delete(id)) {
           notifyBulkProgress();

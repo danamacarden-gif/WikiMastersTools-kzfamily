@@ -48,10 +48,25 @@ Ou retélécharger manuellement et remplacer le dossier.
 
 Puis cliquer sur **Recharger** dans `chrome://extensions/` et faire un F5 sur WikiMasters.
 
+## Tests de régression
+
+Avec Node.js 22 ou plus récent, sans dépendance à installer :
+
+```bash
+node --test tests/*.test.js
+```
+
+Les tests couvrent les prix par rareté, les exemplaires en double, le cache et la file de
+chargement, les délais réseau, les limitations du serveur, l'arrêt des paquets et les
+ouvertures concurrentes entre onglets. Les réponses réseau sont simulées ; aucun
+paquet réel n'est consommé par ces tests.
+
 ## Patch note
 
 *Heure de Paris*
 
+- **05/10/2026 — v4.29.1** — Interface des paquets simplifiée : suppression des boutons « Arrêter » et « Revoir le dernier récap » ; compteur discret « 3/5 ouverts » pendant l’ouverture, conservé pendant les attentes.
+- **05/10/2026 — v4.29** — Correction des prix sur les exemplaires en double et des moyennes d'une autre rareté ; délais réseau et limitations de requêtes gérés ; ouvertures protégées entre onglets ; bouton « Arrêter » et récapitulatif récupérable après rechargement. L'arrêt de l'ouverture automatique interrompt le lot après le paquet en cours. Les vérifications du site doivent être validées manuellement. Les anciens prix en cache seront rechargés pour éliminer les moyennes incorrectes.
 - **05/10/2026** — Ajout de la page « Mes enchères » avec suivi, surenchère en un clic et alerte sonore, désactivable dans les paramètres.
 - **30/09/2026** — Ajout de la page « Familles ».
 - **28/09/2026** — Nouveaux outils pour les cartes, les échanges et les notifications, avec davantage de réglages pour les paquets.

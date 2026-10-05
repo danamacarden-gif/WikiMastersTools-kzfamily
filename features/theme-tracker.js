@@ -108,7 +108,7 @@
             const key = localStorage.key(index);
             if (!key || key === STORAGE_KEY) continue;
 
-            const isPriceCache = /^wm_avg_v[123]_/.test(key);
+            const isPriceCache = /^wm_avg_v[1234]_/.test(key);
             const isMissingImageCache = key.startsWith('wm_missing_img_v2_');
             if (!isPriceCache && !isMissingImageCache) continue;
 

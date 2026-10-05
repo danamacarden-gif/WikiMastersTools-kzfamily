@@ -160,6 +160,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
     const extensionRuntime = getExtensionRuntime();
     if (!extensionRuntime?.getURL) return;
+    document.documentElement.dataset.wmExtensionVersion = extensionRuntime.getManifest?.().version || 'unknown';
 
     const paths = [
       'bridge/core.js',
