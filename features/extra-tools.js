@@ -9,6 +9,7 @@
       let notificationObserver = null;
       let observedBell = null;
       let audioContext = null;
+      let notificationAudioUnlockInstalled = false;
       const assetCache = new Map();
 
       const TRANSPARENT_PIXEL =
@@ -23,37 +24,57 @@
         return match ? Number(match[0]) : 1;
       }
 
-      function playNotificationChime() {
+      function unlockNotificationAudio() {
+        if (!isEnabled('notificationSound')) return;
+
         try {
           const AudioCtx = window.AudioContext || window.webkitAudioContext;
           if (!AudioCtx) return;
+
           audioContext ||= new AudioCtx();
+
+          if (audioContext.state === 'suspended') {
+            audioContext.resume().catch(() => {});
+          }
+        } catch (error) {
+          console.debug('[WM Average] déverrouillage audio indisponible', error);
+        }
+      }
+
+      function ensureNotificationAudioUnlock() {
+        if (notificationAudioUnlockInstalled) return;
+        notificationAudioUnlockInstalled = true;
+
+        for (const type of ['pointerdown', 'touchend', 'keydown']) {
+          document.addEventListener(type, unlockNotificationAudio, true);
+        }
+      }
+
+      function playNotificationChime() {
+        try {
           const context = audioContext;
 
-          const play = () => {
-            const now = context.currentTime;
-            for (const note of [
-              { frequency: 660, start: now, duration: 0.075 },
-              { frequency: 880, start: now + 0.09, duration: 0.10 }
-            ]) {
-              const oscillator = context.createOscillator();
-              const gain = context.createGain();
-              oscillator.type = 'sine';
-              oscillator.frequency.setValueAtTime(note.frequency, note.start);
-              gain.gain.setValueAtTime(0.0001, note.start);
-              gain.gain.exponentialRampToValueAtTime(0.055, note.start + 0.012);
-              gain.gain.exponentialRampToValueAtTime(0.0001, note.start + note.duration);
-              oscillator.connect(gain);
-              gain.connect(context.destination);
-              oscillator.start(note.start);
-              oscillator.stop(note.start + note.duration + 0.02);
-            }
-          };
+          // Chrome interdit la création/reprise d'un AudioContext avant un geste
+          // utilisateur. Si l'audio n'a pas encore été déverrouillé, on ignore
+          // simplement cette notification au lieu de générer une erreur d'extension.
+          if (!context || context.state !== 'running') return;
 
-          if (context.state === 'suspended') {
-            context.resume().then(play).catch(() => {});
-          } else {
-            play();
+          const now = context.currentTime;
+          for (const note of [
+            { frequency: 660, start: now, duration: 0.075 },
+            { frequency: 880, start: now + 0.09, duration: 0.10 }
+          ]) {
+            const oscillator = context.createOscillator();
+            const gain = context.createGain();
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(note.frequency, note.start);
+            gain.gain.setValueAtTime(0.0001, note.start);
+            gain.gain.exponentialRampToValueAtTime(0.055, note.start + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, note.start + note.duration);
+            oscillator.connect(gain);
+            gain.connect(context.destination);
+            oscillator.start(note.start);
+            oscillator.stop(note.start + note.duration + 0.02);
           }
         } catch (error) {
           console.debug('[WM Average] son de notification indisponible', error);
@@ -68,6 +89,8 @@
           observedBell = null;
           return;
         }
+
+        ensureNotificationAudioUnlock();
 
         const bell = document.querySelector('button[aria-label="Notifications"]');
         if (bell !== observedBell) {
