@@ -1567,6 +1567,7 @@ html.wm-theme-route main > :not(#wm-theme-tracker-page) {
 }
 
 .wm-family-bid-modal {
+  box-sizing: border-box;
   width: min(440px, 100%);
 }
 
@@ -1588,14 +1589,33 @@ html.wm-theme-route main > :not(#wm-theme-tracker-page) {
 }
 
 .wm-family-bid-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   margin-top: 8px;
-  padding: 8px 10px;
-  border: 1px solid rgba(250, 204, 21, 0.26);
-  border-radius: 8px;
-  background: rgba(113, 63, 18, 0.1);
-  color: #fde68a;
-  font-size: 10.5px;
-  line-height: 1.4;
+  padding: 10px 12px;
+  border: 1px solid rgba(139, 92, 246, 0.38);
+  border-radius: 10px;
+  background: rgba(124, 58, 237, 0.12);
+  color: rgb(221, 214, 254);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.wm-family-bid-notice::before {
+  content: "i";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: rgb(139, 92, 246);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  font-style: italic;
+  line-height: 16px;
+  text-align: center;
 }
 
 .wm-family-bid-notice[hidden],
@@ -1605,18 +1625,33 @@ html.wm-theme-route main > :not(#wm-theme-tracker-page) {
 
 .wm-family-bid-form {
   display: grid;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 14px;
 }
 
 .wm-family-bid-form label {
-  display: grid;
-  gap: 5px;
+  font-weight: 800;
+}
+
+.wm-family-bid-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.wm-family-bid-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wm-family-bid-row .wm-family-primary {
+  flex: none;
+  white-space: nowrap;
 }
 
 .wm-family-bid-hint {
-  color: var(--wm-family-muted);
-  font-size: 10px;
+  color: var(--wm-family-faint, var(--wm-family-muted));
+  font-size: 9px;
   line-height: 1.4;
 }
 
@@ -1647,14 +1682,29 @@ html.wm-theme-route main > :not(#wm-theme-tracker-page) {
 
 .wm-family-bid-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   margin-top: 14px;
 }
 
-.wm-family-bid-actions a {
+.wm-family-bid-actions > * {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-align: center;
   text-decoration: none;
+}
+
+@media (max-width: 420px) {
+  .wm-family-bid-row {
+    flex-wrap: wrap;
+  }
+
+  .wm-family-bid-row input,
+  .wm-family-bid-row .wm-family-primary {
+    flex: 1 1 100%;
+  }
 }
 
 .wm-family-market-arrow {
