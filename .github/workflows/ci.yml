@@ -28,11 +28,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # Les avertissements ne font pas échouer le job pour l'instant
-      # (4 avertissements innerHTML connus). Ajouter --warnings-as-errors
-      # une fois corrigés.
+      # Tout avertissement web-ext fait échouer le job (le lint est à 0 depuis
+      # la correction des innerHTML).
       - name: web-ext lint
         run: >
           npx --yes web-ext lint
           --source-dir .
+          --warnings-as-errors
           --ignore-files "tests/**" "README.md" "PRIVACY.md" ".github/**"
