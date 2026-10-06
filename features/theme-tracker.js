@@ -8,6 +8,7 @@
         writeLocalValue,
         registerCards
       } = runtime.core;
+      const familyLogic = runtime.familyLogic;
 
       const PAGE_ID = 'wm-theme-tracker-page';
       const NAV_ID = 'wm-theme-tracker-nav';
@@ -29,6 +30,8 @@
       let visibleCount = CARD_BATCH;
       let searchState = createEmptySearchState();
       let marketState = createEmptyMarketState();
+      // Cartes cochées dans la modale d'ajout (id -> carte), conservées d'une page de résultats à l'autre.
+      let pickerSelection = new Map();
 
       function createEmptyMarketState(familyId = null) {
         return {
@@ -577,6 +580,21 @@
         saveFamily(family);
         registerFamilyCards(family);
         return true;
+      }
+
+      // Ajoute plusieurs cartes d'un coup (une seule sauvegarde) ; renvoie le nombre ajouté.
+      function addCardsToFamily(familyIdValue, cards) {
+        const family = getFamily(familyIdValue);
+        if (!family) return 0;
+
+        const { cards: merged, added } = familyLogic.mergeCards(family.cards, cards);
+        if (!added.length) return 0;
+
+        family.cards = merged;
+        family.updatedAt = Date.now();
+        saveFamily(family);
+        registerFamilyCards(family);
+        return added.length;
       }
 
       function removeCardFromFamily(familyIdValue, cardId) {
@@ -1961,7 +1979,8 @@
         return wrap;
       }
 
-      function createSearchResultRow(family, card, refresh) {
+      function createSearchResultRow(family, card, refresh, options = {}) {
+        const { selection = null, onSelectionChange = () => {} } = options;
         const row = document.createElement('div');
         row.className = 'wm-family-picker-result';
 
@@ -2008,10 +2027,29 @@
           if (selected) removeCardFromFamily(family.id, card.id);
           else addCardToFamily(family.id, card);
 
+          selection?.delete(card.id);
           refresh();
         });
 
-        row.append(image, copy, action);
+        // Case à cocher seulement pour les cartes pas encore dans la famille.
+        if (selection && !selected) {
+          const check = document.createElement('input');
+          check.type = 'checkbox';
+          check.className = 'wm-family-picker-check';
+          check.dataset.cardId = card.id;
+          check.checked = selection.has(card.id);
+          check.setAttribute('aria-label', `Sélectionner ${card.title}`);
+          check.addEventListener('change', () => {
+            if (check.checked) selection.set(card.id, card);
+            else selection.delete(card.id);
+            onSelectionChange();
+          });
+          row.classList.add('has-check');
+          row.append(check, image, copy, action);
+        } else {
+          row.append(image, copy, action);
+        }
+
         return row;
       }
 
@@ -2169,7 +2207,11 @@
             fragment.append(createSearchResultRow(
               family,
               card,
-              () => renderCardManagerResults(familyIdValue, overlay)
+              () => renderCardManagerResults(familyIdValue, overlay),
+              {
+                selection: pickerSelection,
+                onSelectionChange: () => updatePickerBulkBar(familyIdValue, overlay)
+              }
             ));
           }
 
@@ -2183,7 +2225,47 @@
           }
         }
 
+        updatePickerBulkBar(familyIdValue, overlay);
         renderPickerPagination(familyIdValue, overlay);
+      }
+
+      // Barre « Tout cocher / Ajouter la sélection » : met à jour textes, compteur et états.
+      function updatePickerBulkBar(familyIdValue, overlay) {
+        const family = getFamily(familyIdValue);
+        const bar = overlay?.querySelector('[data-role="picker-bulk"]');
+        if (!family || !bar) return;
+
+        const selectAll = bar.querySelector('[data-role="picker-select-all"]');
+        const count = bar.querySelector('[data-role="picker-selection-count"]');
+        const addButton = bar.querySelector('[data-role="picker-add-selection"]');
+        if (!selectAll || !count || !addButton) return;
+
+        // Une carte déjà dans la famille ne peut plus être sélectionnée.
+        for (const id of [...pickerSelection.keys()]) {
+          if (family.cards.some((card) => card.id === id)) pickerSelection.delete(id);
+        }
+
+        const hasResults = !searchState.loading && !searchState.error && searchState.results.length > 0;
+        const addable = hasResults
+          ? familyLogic.pickAddable(family.cards, searchState.results)
+          : [];
+        const allChecked = addable.length > 0 && addable.every((card) => pickerSelection.has(card.id));
+        const selectedCount = pickerSelection.size;
+
+        bar.hidden = !hasResults;
+        selectAll.disabled = addable.length === 0;
+        selectAll.textContent = allChecked ? 'Tout décocher' : 'Tout cocher';
+
+        if (selectedCount) {
+          count.textContent = `${selectedCount.toLocaleString('fr-FR')} sélectionnée${selectedCount > 1 ? 's' : ''}`;
+        } else {
+          count.textContent = addable.length ? '' : 'Toutes les cartes de la page sont déjà ajoutées.';
+        }
+
+        addButton.disabled = selectedCount === 0;
+        addButton.textContent = selectedCount
+          ? `Ajouter la sélection (${selectedCount.toLocaleString('fr-FR')})`
+          : 'Ajouter la sélection';
       }
 
       async function runCardSearch(familyIdValue, overlay, query, targetPage = 0) {
@@ -2266,6 +2348,8 @@
           searchState = createEmptySearchState(familyIdValue);
         }
 
+        pickerSelection = new Map();
+
         const overlay = document.createElement('div');
         overlay.className = 'wm-family-modal-overlay wm-family-picker-overlay';
 
@@ -2309,6 +2393,30 @@
         status.className = 'wm-family-picker-status';
         status.dataset.role = 'picker-status';
 
+        const bulk = document.createElement('div');
+        bulk.className = 'wm-family-picker-bulk';
+        bulk.dataset.role = 'picker-bulk';
+        bulk.hidden = true;
+
+        const selectAll = document.createElement('button');
+        selectAll.type = 'button';
+        selectAll.className = 'wm-family-link-button wm-family-picker-selectall';
+        selectAll.dataset.role = 'picker-select-all';
+        selectAll.textContent = 'Tout cocher';
+
+        const selectionCount = document.createElement('span');
+        selectionCount.className = 'wm-family-picker-selection-count';
+        selectionCount.dataset.role = 'picker-selection-count';
+
+        const addSelection = document.createElement('button');
+        addSelection.type = 'button';
+        addSelection.className = 'wm-family-primary';
+        addSelection.dataset.role = 'picker-add-selection';
+        addSelection.textContent = 'Ajouter la sélection';
+        addSelection.disabled = true;
+
+        bulk.append(selectAll, selectionCount, addSelection);
+
         const results = document.createElement('div');
         results.className = 'wm-family-picker-results';
         results.dataset.role = 'picker-results';
@@ -2318,11 +2426,12 @@
         pagination.dataset.role = 'picker-pagination';
         pagination.setAttribute('aria-label', 'Pagination des résultats');
 
-        modal.append(head, form, status, results, pagination);
+        modal.append(head, form, status, bulk, results, pagination);
         overlay.append(modal);
         document.body.append(overlay);
 
         const closeManager = () => {
+          pickerSelection.clear();
           overlay.remove();
           renderPageContent();
         };
@@ -2335,6 +2444,33 @@
         form.addEventListener('submit', (event) => {
           event.preventDefault();
           runCardSearch(familyIdValue, overlay, input.value, 0);
+        });
+
+        // « Tout cocher » agit sur la page de résultats affichée ; « Tout décocher » l'annule.
+        selectAll.addEventListener('click', () => {
+          const family = getFamily(familyIdValue);
+          if (!family) return;
+
+          const addable = familyLogic.pickAddable(family.cards, searchState.results);
+          const allChecked = addable.length > 0 && addable.every((card) => pickerSelection.has(card.id));
+
+          for (const card of addable) {
+            if (allChecked) pickerSelection.delete(card.id);
+            else pickerSelection.set(card.id, card);
+          }
+
+          results.querySelectorAll('.wm-family-picker-check').forEach((box) => {
+            box.checked = pickerSelection.has(box.dataset.cardId);
+          });
+          updatePickerBulkBar(familyIdValue, overlay);
+        });
+
+        addSelection.addEventListener('click', () => {
+          if (!pickerSelection.size) return;
+
+          addCardsToFamily(familyIdValue, [...pickerSelection.values()]);
+          pickerSelection.clear();
+          renderCardManagerResults(familyIdValue, overlay);
         });
 
         renderCardManagerResults(familyIdValue, overlay);
