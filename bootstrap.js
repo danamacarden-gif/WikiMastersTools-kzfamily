@@ -186,6 +186,8 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       'features/extra-tools.js',
       'features/family-logic.js',
       'features/theme-tracker.js',
+      'features/ui-kit.js',
+      'features/auto-bid-logic.js',
       'features/my-bids-logic.js',
       'features/my-bids.js',
       'features/app.js',

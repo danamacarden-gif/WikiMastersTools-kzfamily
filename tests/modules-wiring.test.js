@@ -84,3 +84,20 @@ test('les prix des cartes de famille sont câblés : price-ui notifie themeTrack
   assert.match(read('features/price-ui.js'), /runtime\.themeTracker\?\.renderCardPrice\?\.\(id\)/);
   assert.match(read('features/theme-tracker.js'), /return \{\s*render,\s*isThemePage,\s*renderCardPrice\s*\}/);
 });
+
+test('auto-enchère : uiKit, autoBidLogic et myBidsLogic sont créés avant myBids', () => {
+  const content = read('content.js');
+  const created = (name) => content.indexOf(`runtime.${name} = featureRegistry.${name}.create`);
+  const myBids = created('myBids');
+
+  assert.ok(myBids > 0);
+  for (const name of ['uiKit', 'autoBidLogic', 'myBidsLogic']) {
+    assert.ok(created(name) >= 0 && created(name) < myBids, `${name} doit être créé avant myBids`);
+  }
+
+  const paths = bootstrapPaths();
+  for (const file of ['features/ui-kit.js', 'features/auto-bid-logic.js']) {
+    assert.ok(paths.includes(file), `${file} absent de bootstrap.js`);
+    assert.ok(manifestResources().has(file), `${file} absent du manifest`);
+  }
+});
