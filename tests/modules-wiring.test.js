@@ -50,6 +50,14 @@ test('content.js exige et instancie familyLogic avant themeTracker', () => {
   assert.ok(created >= 0 && created < createdTracker, 'familyLogic doit être créé avant themeTracker');
 });
 
+test('content.js crée myBidsLogic avant themeTracker (la modale de mise s\'en sert)', () => {
+  const content = read('content.js');
+  const logic = content.indexOf('runtime.myBidsLogic = featureRegistry.myBidsLogic.create()');
+  const tracker = content.indexOf('runtime.themeTracker = featureRegistry.themeTracker.create');
+
+  assert.ok(logic >= 0 && logic < tracker, 'myBidsLogic doit être créé avant themeTracker');
+});
+
 test('chaque module des features est enregistré sous un nom exigé par content.js', () => {
   const content = read('content.js');
   const required = new Set(
