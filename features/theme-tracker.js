@@ -2668,7 +2668,12 @@
         const groups = document.createElement('div');
         groups.className = 'wm-family-market-groups';
 
-        for (const card of missingCards) {
+        // Filtre « Enchères en cours » : la fin la plus proche en premier (sinon ordre alphabétique).
+        const orderedCards = marketFilter === 'auctions'
+          ? familyLogic.sortByNextEnd(missingCards, (card) => marketCardState(card.id).listings, liveNow)
+          : missingCards;
+
+        for (const card of orderedCards) {
           const state = marketCardState(card.id);
           const offers = [...(marketFilter === 'auctions'
             ? familyLogic.liveListings(state.listings, liveNow)

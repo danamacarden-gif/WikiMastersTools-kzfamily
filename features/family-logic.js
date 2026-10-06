@@ -73,6 +73,31 @@
       return (Array.isArray(listings) ? listings : []).filter((auction) => isLiveAuction(auction, now));
     }
 
+    // Prochaine fin d'enchère parmi les annonces en cours (timestamp ms), ou null.
+    function nextEndTime(listings, now = Date.now()) {
+      const ends = liveListings(listings, now)
+        .map((auction) => Date.parse(auction?.end_at))
+        .filter(Number.isFinite);
+      return ends.length ? Math.min(...ends) : null;
+    }
+
+    // Trie des cartes de l'enchère qui se termine le plus tôt à celle qui finit le plus loin.
+    // `getListings(card)` donne les annonces de la carte ; sans enchère en cours, la carte passe
+    // en dernier. À égalité, ordre alphabétique. Ne modifie pas la liste d'entrée.
+    function sortByNextEnd(cards, getListings, now = Date.now()) {
+      return (Array.isArray(cards) ? cards : [])
+        .map((card) => ({ card, end: nextEndTime(getListings(card), now) }))
+        .sort((a, b) => {
+          if (a.end !== b.end) {
+            if (a.end == null) return 1;
+            if (b.end == null) return -1;
+            return a.end - b.end;
+          }
+          return compareTitles(a.card, b.card);
+        })
+        .map(({ card }) => card);
+    }
+
     // Valide le montant saisi avant d'envoyer une mise. `reason` : 'invalid' (pas un
     // entier positif), 'below-minimum' ou 'insufficient-balance' (solde connu seulement).
     function validateBid(input, minimum, balance) {
@@ -109,7 +134,7 @@
     }
 
     return {
-      RARITIES, pickAddable, mergeCards, auctionBidInfo, isLiveAuction, liveListings,
+      RARITIES, nextEndTime, sortByNextEnd, pickAddable, mergeCards, auctionBidInfo, isLiveAuction, liveListings,
       validateBid, filterCards, rarityCounts
     };
   }
