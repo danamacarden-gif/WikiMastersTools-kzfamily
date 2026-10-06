@@ -1920,7 +1920,9 @@
         const badge = document.createElement('span');
         badge.className = 'wm-family-rarity-badge';
         badge.dataset.rarity = rarity;
-        badge.textContent = RARITY_LABELS[rarity];
+        badge.textContent = rarity;
+        badge.title = RARITY_LABELS[rarity];
+        badge.setAttribute('aria-label', RARITY_LABELS[rarity]);
         return badge;
       }
 
