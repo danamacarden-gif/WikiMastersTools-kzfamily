@@ -1624,24 +1624,61 @@
       // adoptedStyleSheets n'est pas bloqué par la CSP de la page, contrairement à un <style> inline.
       const BID_MODAL_CSS = `
 .wm-family-bid-modal {
+  --bid-accent: #34d399;
+  --bid-accent-soft: rgba(52, 211, 153, 0.12);
+  --bid-accent-line: rgba(52, 211, 153, 0.34);
+  position: relative;
   box-sizing: border-box;
-  width: min(440px, 100%);
+  width: min(480px, 100%);
+  padding: 26px 26px 24px;
+  border-radius: 20px;
+}
+
+.wm-family-bid-modal h2 {
+  margin: 0;
+  padding-right: 36px;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.wm-family-bid-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--wm-family-muted);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wm-family-bid-close:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--color-foreground);
 }
 
 .wm-family-bid-meta {
-  margin: 4px 0 12px;
+  margin: 6px 0 18px;
   color: var(--wm-family-muted);
-  font-size: 10.5px;
+  font-size: 13px;
   line-height: 1.4;
 }
 
 .wm-family-bid-status {
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
-  font-size: 12px;
-  font-weight: 800;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 14px;
+  font-weight: 700;
   line-height: 1.4;
 }
 
@@ -1649,29 +1686,29 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  margin-top: 8px;
-  padding: 10px 12px;
-  border: 1px solid rgba(139, 92, 246, 0.38);
-  border-radius: 10px;
-  background: rgba(124, 58, 237, 0.12);
-  color: rgb(221, 214, 254);
-  font-size: 11px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--bid-accent-line);
+  border-radius: 12px;
+  background: var(--bid-accent-soft);
+  color: #a7f3d0;
+  font-size: 13px;
   line-height: 1.45;
 }
 
 .wm-family-bid-notice::before {
   content: "i";
   flex: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   margin-top: 1px;
   border-radius: 50%;
-  background: rgb(139, 92, 246);
-  color: #fff;
-  font-size: 10px;
+  background: var(--bid-accent);
+  color: #052e1f;
+  font-size: 12px;
   font-weight: 800;
   font-style: italic;
-  line-height: 16px;
+  line-height: 18px;
   text-align: center;
 }
 
@@ -1682,33 +1719,67 @@
 
 .wm-family-bid-form {
   display: grid;
-  gap: 6px;
-  margin-top: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 20px;
 }
 
 .wm-family-bid-form label {
+  color: var(--wm-family-muted);
+  font-size: 11px;
   font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .wm-family-bid-row {
   display: flex;
   align-items: stretch;
-  gap: 8px;
+  gap: 10px;
 }
 
 .wm-family-bid-row input {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  box-sizing: border-box;
+  width: 0;
   min-width: 0;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 16px;
+  font-weight: 700;
 }
 
-.wm-family-bid-row .wm-family-primary {
+.wm-family-bid-row input:focus,
+.wm-family-bid-row input:focus-visible {
+  border-color: var(--bid-accent);
+  outline: 2px solid var(--bid-accent-line);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.wm-family-bid-modal .wm-family-primary {
   flex: none;
+  min-height: 48px;
+  padding: 0 18px;
+  border: 1px solid var(--bid-accent-line);
+  border-radius: 12px;
+  background: var(--bid-accent-soft);
+  box-shadow: none;
+  color: var(--bid-accent);
+  font-size: 14px;
   white-space: nowrap;
+}
+
+.wm-family-bid-modal .wm-family-primary:hover:not(:disabled) {
+  border-color: var(--bid-accent);
+  background: rgba(52, 211, 153, 0.2);
 }
 
 .wm-family-bid-hint {
   color: var(--wm-family-faint, var(--wm-family-muted));
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.4;
 }
 
@@ -1717,11 +1788,11 @@
 }
 
 .wm-family-bid-feedback {
-  margin-top: 10px;
-  padding: 8px 10px;
+  margin-top: 12px;
+  padding: 10px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-size: 11px;
+  border-radius: 12px;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -1740,7 +1811,7 @@
 .wm-family-bid-actions {
   display: flex;
   gap: 10px;
-  margin-top: 14px;
+  margin-top: 20px;
 }
 
 .wm-family-bid-actions > * {
@@ -1749,17 +1820,24 @@
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
+  min-height: 46px;
+  border-radius: 12px;
+  font-size: 14px;
   text-align: center;
   text-decoration: none;
 }
 
-@media (max-width: 420px) {
+@media (max-width: 440px) {
+  .wm-family-bid-modal {
+    padding: 22px 18px 18px;
+  }
+
   .wm-family-bid-row {
     flex-wrap: wrap;
   }
 
   .wm-family-bid-row input,
-  .wm-family-bid-row .wm-family-primary {
+  .wm-family-bid-modal .wm-family-bid-row .wm-family-primary {
     flex: 1 1 100%;
   }
 }
@@ -1888,7 +1966,14 @@
         close.textContent = 'Fermer';
 
         actions.append(open, close);
-        modal.append(title, meta, status, notice, form, feedback, actions);
+
+        const closeIcon = document.createElement('button');
+        closeIcon.type = 'button';
+        closeIcon.className = 'wm-family-bid-close';
+        closeIcon.setAttribute('aria-label', 'Fermer la fenêtre');
+        closeIcon.textContent = '✕';
+
+        modal.append(title, closeIcon, meta, status, notice, form, feedback, actions);
         overlay.append(modal);
 
         // Le minimum annoncé par le serveur ne vaut que pour le niveau de prix où il a été
@@ -2065,6 +2150,7 @@
         }
 
         close.addEventListener('click', closeModal);
+        closeIcon.addEventListener('click', closeModal);
         overlay.addEventListener('click', (event) => {
           if (event.target === overlay) closeModal();
         });
