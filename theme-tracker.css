@@ -844,6 +844,51 @@ html.wm-theme-route main > :not(#wm-theme-tracker-page) {
   color: #fca5a5;
 }
 
+.wm-family-picker-bulk {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px 9px;
+}
+
+.wm-family-picker-bulk[hidden] {
+  display: none;
+}
+
+.wm-family-picker-selectall:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.wm-family-picker-selection-count {
+  flex: 1;
+  min-width: 0;
+  color: var(--wm-family-muted);
+  font-size: 10px;
+}
+
+.wm-family-picker-bulk .wm-family-primary {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.wm-family-picker-result.has-check {
+  grid-template-columns: 18px 48px minmax(0, 1fr) auto;
+}
+
+.wm-family-picker-check {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--wm-family-accent);
+  cursor: pointer;
+}
+
+.wm-family-picker-check:focus-visible {
+  outline: 2px solid rgba(192, 132, 252, 0.72);
+  outline-offset: 2px;
+}
+
 .wm-family-picker-results {
   display: flex;
   min-height: 180px;
@@ -1253,6 +1298,15 @@ html.wm-theme-route main > :not(#wm-theme-tracker-page) {
     padding-inline: 12px;
   }
 
+  .wm-family-picker-result.has-check {
+    grid-template-columns: 18px 42px minmax(0, 1fr) auto;
+  }
+
+  .wm-family-picker-bulk {
+    padding-inline: 14px;
+    flex-wrap: wrap;
+  }
+
   .wm-family-picker-thumb {
     width: 40px;
     height: 40px;
@@ -1314,13 +1368,6 @@ html.wm-theme-route main > :not(#wm-theme-tracker-page) {
 
 
 /* v4.26 — marché des cartes manquantes */
-.wm-family-dev-note {
-  margin: 0 0 8px;
-  color: color-mix(in srgb, var(--color-foreground) 42%, transparent);
-  font-size: 10px;
-  line-height: 1.35;
-}
-
 .wm-family-market-toggle {
   position: relative;
 }
