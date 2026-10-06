@@ -1338,10 +1338,6 @@
 
         const copy = document.createElement('div');
 
-        const devNote = document.createElement('p');
-        devNote.className = 'wm-family-dev-note';
-        devNote.textContent = 'Si les devs veulent que je travaille pour eux, j’ai un Master 2 en conception logicielle et je suis très gentil.';
-
         const title = document.createElement('h1');
         title.textContent = 'Familles';
 
@@ -1359,7 +1355,7 @@
         introShare.textContent = 'Tu peux aussi importer ou exporter une famille pour la partager. Dans le futur, j’ajouterai sûrement des familles préfaites si des gens m’en envoient.';
 
         intro.append(introMain, marketHighlight, introShare);
-        copy.append(devNote, title, intro);
+        copy.append(title, intro);
 
         const homeActions = document.createElement('div');
         homeActions.className = 'wm-family-home-actions';
