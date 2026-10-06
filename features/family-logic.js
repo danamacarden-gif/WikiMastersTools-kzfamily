@@ -3,6 +3,8 @@
     ? (window.__wmAverageFeatures ||= {})
     : null;
 
+  const RARITIES = ['L', 'UR', 'SR', 'R', 'PC', 'C'];
+
   function create() {
     function compareTitles(a, b) {
       return String(a?.title ?? '').localeCompare(String(b?.title ?? ''), 'fr');
@@ -84,7 +86,32 @@
       return { ok: true, amount };
     }
 
-    return { pickAddable, mergeCards, auctionBidInfo, isLiveAuction, liveListings, validateBid };
+    // Filtre d'une famille : `ownership` ('all' | 'owned' | 'missing' | 'unchecked') combiné
+    // à `rarity` (null/'' = toutes, sinon un code de RARITIES). Renvoie une nouvelle liste.
+    function filterCards(cards, { ownership = 'all', rarity = null } = {}) {
+      let list = Array.isArray(cards) ? [...cards] : [];
+
+      if (ownership === 'owned') list = list.filter((card) => card?.owned === true);
+      if (ownership === 'missing') list = list.filter((card) => card?.owned === false);
+      if (ownership === 'unchecked') list = list.filter((card) => card?.owned == null);
+      if (rarity) list = list.filter((card) => card?.rarity === rarity);
+
+      return list;
+    }
+
+    // Nombre de cartes par rareté (sur la liste donnée), pour afficher les puces utiles.
+    function rarityCounts(cards) {
+      const counts = Object.fromEntries(RARITIES.map((code) => [code, 0]));
+      for (const card of Array.isArray(cards) ? cards : []) {
+        if (card && Object.prototype.hasOwnProperty.call(counts, card.rarity)) counts[card.rarity] += 1;
+      }
+      return counts;
+    }
+
+    return {
+      RARITIES, pickAddable, mergeCards, auctionBidInfo, isLiveAuction, liveListings,
+      validateBid, filterCards, rarityCounts
+    };
   }
 
   if (registry) registry.familyLogic = { create };

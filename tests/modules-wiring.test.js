@@ -73,3 +73,14 @@ test('chaque module des features est enregistré sous un nom exigé par content.
     }
   }
 });
+
+test('les prix des cartes de famille sont câblés : price-ui notifie themeTracker, créé après les prix', () => {
+  const content = read('content.js');
+  const loader = content.indexOf('runtime.priceLoader = featureRegistry.priceLoader.create');
+  const ui = content.indexOf('runtime.priceUi = featureRegistry.priceUi.create');
+  const tracker = content.indexOf('runtime.themeTracker = featureRegistry.themeTracker.create');
+
+  assert.ok(ui >= 0 && loader >= 0 && tracker > ui && tracker > loader, 'priceUi et priceLoader doivent précéder themeTracker');
+  assert.match(read('features/price-ui.js'), /runtime\.themeTracker\?\.renderCardPrice\?\.\(id\)/);
+  assert.match(read('features/theme-tracker.js'), /return \{\s*render,\s*isThemePage,\s*renderCardPrice\s*\}/);
+});

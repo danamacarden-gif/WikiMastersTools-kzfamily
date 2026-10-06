@@ -28,6 +28,10 @@
       let editingFamilyId = null;
       let marketFamilyId = null;
       let currentFilter = 'all';
+      // Filtre de rareté d'une famille (code L/UR/SR/R/PC/C) ; null = toutes.
+      let currentRarity = null;
+      // Carte sur laquelle on a cliqué pour lancer la recherche d'enchères : { familyId, cardId }.
+      let marketFocus = null;
       let visibleCount = CARD_BATCH;
       let searchState = createEmptySearchState();
       let marketState = createEmptyMarketState();
@@ -1091,6 +1095,7 @@
 
       function openMissingMarketplace(family) {
         marketFamilyId = family.id;
+        marketFocus = null;
 
         if (marketState.familyId !== family.id) {
           marketState = createEmptyMarketState(family.id);
@@ -1332,6 +1337,7 @@
           marketFamilyId = null;
           marketState = createEmptyMarketState(family.id);
           currentFilter = 'all';
+          currentRarity = null;
           visibleCount = CARD_BATCH;
           if (searchState.familyId !== family.id) {
             searchState = createEmptySearchState(family.id);
@@ -1429,13 +1435,67 @@
       }
 
       function filteredCards(family) {
-        let cards = [...family.cards];
+        return familyLogic
+          .filterCards(family.cards, { ownership: currentFilter, rarity: currentRarity })
+          .sort((a, b) => a.title.localeCompare(b.title, 'fr'));
+      }
 
-        if (currentFilter === 'owned') cards = cards.filter((card) => card.owned === true);
-        if (currentFilter === 'missing') cards = cards.filter((card) => card.owned === false);
-        if (currentFilter === 'unchecked') cards = cards.filter((card) => card.owned == null);
+      const formatPriceValue = (value) => runtime.priceUi.formatAverage(value);
 
-        return cards.sort((a, b) => a.title.localeCompare(b.title, 'fr'));
+      // Pastille « Moy. N W » d'une carte de famille, alimentée par le même cache de prix
+      // que les pages collection (moyenne des ventes de la rareté de la carte).
+      const hasPriceSupport = () => Boolean(
+        runtime.core.cacheMemory && runtime.priceUi?.chooseAverage && runtime.priceLoader
+      );
+
+      function paintPriceTag(tag, card) {
+        const entry = runtime.core.cacheMemory.get(card.id);
+
+        if (!entry) {
+          tag.textContent = 'Prix…';
+          tag.classList.add('is-empty');
+          tag.title = 'Chargement du prix moyen…';
+          return;
+        }
+
+        const average = entry.ok === false ? null : runtime.priceUi.chooseAverage(entry, null, card.rarity || null);
+        tag.classList.toggle('is-empty', average == null);
+        tag.textContent = entry.ok === false
+          ? 'Prix indispo.'
+          : average == null ? 'Moy. —' : `Moy. ${formatPriceValue(average)} W`;
+        tag.title = entry.ok === false
+          ? 'Erreur temporaire lors du chargement du prix'
+          : 'Prix moyen des ventes (cache 24 h)';
+      }
+
+      // Appelée par price-ui à chaque prix reçu.
+      function renderCardPrice(id) {
+        if (!id || !hasPriceSupport()) return;
+        document.querySelectorAll(`.wm-family-price-tag[data-card-id="${CSS.escape(String(id))}"]`).forEach((tag) => {
+          const card = getFamily(activeFamilyId)?.cards.find((item) => item.id === id);
+          if (card) paintPriceTag(tag, card);
+        });
+      }
+
+      function loadFamilyPrices(cards) {
+        if (!hasPriceSupport() || !runtime.settings.isEnabled('collectionPrices') || !cards.length) return;
+        try {
+          runtime.priceLoader.loadCacheForCards(cards.map((card) => ({
+            id: card.id, title: card.title, rarity: card.rarity
+          })));
+        } catch (error) {
+          console.debug('[WM Average] prix de la famille indisponibles', error);
+        }
+      }
+
+      // Clic sur une carte : ouvre le Marché des cartes manquantes sur cette seule carte
+      // et lance la recherche d'annonces.
+      function searchCardOnMarket(family, card) {
+        openMissingMarketplace(family);
+        marketFocus = { familyId: family.id, cardId: card.id };
+        marketFilter = 'all';
+        window.scrollTo({ top: 0 });
+        searchMarketplaceCard(family, card);
       }
 
       function createRealCard(family, card, editing) {
@@ -1452,6 +1512,40 @@
         if (editing && family.coverCardId === card.id) slot.classList.add('is-cover-card');
 
         slot.append(element);
+
+        const tags = document.createElement('div');
+        tags.className = 'wm-family-card-tags';
+
+        if (card.owned === true) {
+          const owned = document.createElement('span');
+          owned.className = 'wm-family-owned-tag';
+          owned.textContent = card.ownedCount > 1 ? `Possédée ×${card.ownedCount}` : 'Possédée';
+          tags.append(owned);
+        }
+
+        if (hasPriceSupport() && runtime.settings.isEnabled('collectionPrices')) {
+          const price = document.createElement('span');
+          price.className = 'wm-family-price-tag';
+          price.dataset.cardId = card.id;
+          paintPriceTag(price, card);
+          tags.append(price);
+        }
+
+        slot.append(tags);
+
+        if (!editing) {
+          slot.classList.add('is-clickable');
+          slot.tabIndex = 0;
+          slot.setAttribute('role', 'button');
+          slot.setAttribute('aria-label', `Chercher les enchères en cours pour ${card.title}`);
+          slot.title = 'Chercher les enchères en cours pour cette carte';
+          slot.addEventListener('click', () => searchCardOnMarket(family, card));
+          slot.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            searchCardOnMarket(family, card);
+          });
+        }
 
         if (editing) {
           const controls = document.createElement('div');
@@ -1516,6 +1610,7 @@
         }
 
         grid.append(fragment);
+        loadFamilyPrices(cards.slice(previousVisible, nextVisible));
         grid.dataset.visibleCount = String(nextVisible);
         count.textContent = `${cards.length.toLocaleString('fr-FR')} carte${cards.length > 1 ? 's' : ''}`;
 
@@ -1622,7 +1717,7 @@
       // Styles de la modale de mise, injectés par le JS lui-même : ils ne peuvent donc pas être
       // désynchronisés du balisage (le CSS du manifest, lui, n'est rechargé qu'avec l'extension).
       // adoptedStyleSheets n'est pas bloqué par la CSP de la page, contrairement à un <style> inline.
-      const BID_MODAL_CSS = `
+      const INLINE_CSS = `
 .wm-family-rarity-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -1636,18 +1731,144 @@
   white-space: nowrap;
 }
 
-.wm-family-rarity-badge[data-rarity="L"] { --wm-rarity-color: var(--color-rarity-l, #facc15); }
-.wm-family-rarity-badge[data-rarity="UR"] { --wm-rarity-color: var(--color-rarity-ur, #f87171); }
-.wm-family-rarity-badge[data-rarity="SR"] { --wm-rarity-color: var(--color-rarity-sr, #c084fc); }
-.wm-family-rarity-badge[data-rarity="R"] { --wm-rarity-color: var(--color-rarity-r, #60a5fa); }
-.wm-family-rarity-badge[data-rarity="PC"] { --wm-rarity-color: var(--color-rarity-pc, #34d399); }
-.wm-family-rarity-badge[data-rarity="C"] { --wm-rarity-color: var(--color-rarity-c, #d1d5db); }
+.wm-family-rarity-badge[data-rarity="L"],
+.wm-family-rarity-filter[data-rarity="L"] { --wm-rarity-color: var(--color-rarity-l, #facc15); }
+.wm-family-rarity-badge[data-rarity="UR"],
+.wm-family-rarity-filter[data-rarity="UR"] { --wm-rarity-color: var(--color-rarity-ur, #f87171); }
+.wm-family-rarity-badge[data-rarity="SR"],
+.wm-family-rarity-filter[data-rarity="SR"] { --wm-rarity-color: var(--color-rarity-sr, #c084fc); }
+.wm-family-rarity-badge[data-rarity="R"],
+.wm-family-rarity-filter[data-rarity="R"] { --wm-rarity-color: var(--color-rarity-r, #60a5fa); }
+.wm-family-rarity-badge[data-rarity="PC"],
+.wm-family-rarity-filter[data-rarity="PC"] { --wm-rarity-color: var(--color-rarity-pc, #34d399); }
+.wm-family-rarity-badge[data-rarity="C"],
+.wm-family-rarity-filter[data-rarity="C"] { --wm-rarity-color: var(--color-rarity-c, #d1d5db); }
+
+.wm-family-market-card-head span.wm-family-rarity-badge {
+  display: inline-block;
+  margin-top: 0;
+  color: rgb(13, 17, 23);
+  font-size: 11px;
+}
 
 .wm-family-market-card-head .wm-family-market-card-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+.wm-family-rarity-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.wm-family-rarity-filter,
+.wm-family-rarity-reset {
+  height: 34px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wm-family-rarity-filter {
+  min-width: 46px;
+  padding: 0 14px;
+  color: var(--wm-rarity-color, #d1d5db);
+  font-size: 14px;
+  font-weight: 800;
+  opacity: 0.82;
+}
+
+.wm-family-rarity-filter:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.wm-family-rarity-filter.is-active {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.06);
+  opacity: 1;
+}
+
+.wm-family-rarity-filter:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+
+.wm-family-rarity-reset {
+  margin-left: 8px;
+  padding: 0 12px;
+  color: var(--wm-family-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wm-family-rarity-reset:hover {
+  color: var(--color-foreground);
+}
+
+.wm-family-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px;
+  min-height: 22px;
+  margin-top: 8px;
+}
+
+.wm-family-owned-tag,
+.wm-family-price-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.wm-family-owned-tag {
+  background: rgb(22, 163, 106);
+  color: #fff;
+}
+
+.wm-family-price-tag {
+  border: 1px solid rgba(79, 255, 157, 0.42);
+  background: rgba(10, 14, 12, 0.84);
+  color: #b7ffd7;
+}
+
+.wm-family-price-tag.is-empty {
+  border-color: rgba(209, 213, 219, 0.3);
+  color: #d1d5db;
+}
+
+.wm-family-card-slot.is-clickable .wm-family-native-card {
+  cursor: pointer;
+}
+
+.wm-family-market-focus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+}
+
+.wm-family-market-focus button {
+  margin-left: auto;
 }
 
 .wm-family-bid-layout {
@@ -1903,7 +2124,7 @@
   }
 }
 `;
-      let bidStyleSheet = null;
+      let inlineStyleSheet = null;
 
       const RARITY_LABELS = {
         L: 'Légendaire',
@@ -1926,24 +2147,24 @@
         return badge;
       }
 
-      function ensureBidModalStyles() {
+      function ensureInlineStyles() {
         try {
-          if (!bidStyleSheet) {
-            bidStyleSheet = new CSSStyleSheet();
-            bidStyleSheet.replaceSync(BID_MODAL_CSS);
+          if (!inlineStyleSheet) {
+            inlineStyleSheet = new CSSStyleSheet();
+            inlineStyleSheet.replaceSync(INLINE_CSS);
           }
-          if (!document.adoptedStyleSheets.includes(bidStyleSheet)) {
-            document.adoptedStyleSheets = [...document.adoptedStyleSheets, bidStyleSheet];
+          if (!document.adoptedStyleSheets.includes(inlineStyleSheet)) {
+            document.adoptedStyleSheets = [...document.adoptedStyleSheets, inlineStyleSheet];
           }
           return;
         } catch (_) {
           // navigateur sans feuilles constructibles : repli sur un <style>
         }
 
-        if (document.getElementById('wm-family-bid-styles')) return;
+        if (document.getElementById('wm-family-inline-styles')) return;
         const style = document.createElement('style');
-        style.id = 'wm-family-bid-styles';
-        style.textContent = BID_MODAL_CSS;
+        style.id = 'wm-family-inline-styles';
+        style.textContent = INLINE_CSS;
         document.head.append(style);
       }
 
@@ -1951,7 +2172,7 @@
       // sans quitter la famille. Une mise = un clic explicite sur le bouton qui affiche le montant.
       function openBidModal(familyIdValue, cardId, auctionId) {
         if (document.querySelector('.wm-family-bid-overlay')) return;
-        ensureBidModalStyles();
+        ensureInlineStyles();
 
         const family = getFamily(familyIdValue);
         const card = family?.cards.find((item) => item.id === cardId);
@@ -2291,7 +2512,7 @@
       }
 
       function buildMarketplacePanel(family) {
-        ensureBidModalStyles();
+        ensureInlineStyles();
         const panel = document.createElement('section');
         panel.className = 'wm-family-market-panel';
 
@@ -2318,9 +2539,34 @@
         header.append(copy, searchAll);
         panel.append(header);
 
-        const missingCards = (family.cards || [])
-          .filter((card) => card.owned === false)
-          .sort((a, b) => a.title.localeCompare(b.title, 'fr'));
+        const focusedCard = marketFocus?.familyId === family.id
+          ? (family.cards || []).find((card) => card.id === marketFocus.cardId)
+          : null;
+
+        // Carte ciblée par un clic : on ne montre qu'elle (même si elle est possédée).
+        const missingCards = focusedCard
+          ? [focusedCard]
+          : (family.cards || [])
+            .filter((card) => card.owned === false)
+            .sort((a, b) => a.title.localeCompare(b.title, 'fr'));
+
+        if (focusedCard) {
+          const focus = document.createElement('div');
+          focus.className = 'wm-family-market-focus';
+          focus.dataset.role = 'market-focus';
+          const focusText = document.createElement('span');
+          focusText.textContent = `Recherche sur : ${focusedCard.title}`;
+          const focusClear = document.createElement('button');
+          focusClear.type = 'button';
+          focusClear.className = 'wm-family-secondary';
+          focusClear.textContent = 'Toutes les manquantes';
+          focusClear.addEventListener('click', () => {
+            marketFocus = null;
+            renderPageContent();
+          });
+          focus.append(focusText, focusClear);
+          panel.append(focus);
+        }
 
         const summary = document.createElement('div');
         summary.className = 'wm-family-market-summary';
@@ -2522,6 +2768,7 @@
       }
 
       function buildDetail(family) {
+        ensureInlineStyles();
         const stats = familyStats(family);
         const wrap = document.createElement('div');
         wrap.className = 'wm-family-detail';
@@ -2704,6 +2951,45 @@
           });
         });
 
+        const rarityCounts = familyLogic.rarityCounts(family.cards);
+        const rarityRow = document.createElement('div');
+        rarityRow.className = 'wm-family-rarity-filters';
+
+        const rarityButtons = familyLogic.RARITIES.map((code) => {
+          const rarityButton = document.createElement('button');
+          rarityButton.type = 'button';
+          rarityButton.className = 'wm-family-rarity-filter';
+          rarityButton.dataset.rarity = code;
+          rarityButton.textContent = code;
+          rarityButton.disabled = rarityCounts[code] === 0;
+          rarityButton.title = `${RARITY_LABELS[code]} • ${rarityCounts[code]} carte${rarityCounts[code] > 1 ? 's' : ''}`;
+          return rarityButton;
+        });
+
+        const rarityReset = document.createElement('button');
+        rarityReset.type = 'button';
+        rarityReset.className = 'wm-family-rarity-reset';
+        rarityReset.textContent = '✕ Réinitialiser rareté';
+
+        const syncRarity = () => {
+          rarityButtons.forEach((item) => item.classList.toggle('is-active', item.dataset.rarity === currentRarity));
+          rarityReset.hidden = !currentRarity;
+        };
+
+        const applyRarity = (code) => {
+          currentRarity = code;
+          visibleCount = CARD_BATCH;
+          syncRarity();
+          renderDetailGrid(family, wrap);
+        };
+
+        rarityButtons.forEach((item) => {
+          item.addEventListener('click', () => applyRarity(currentRarity === item.dataset.rarity ? null : item.dataset.rarity));
+        });
+        rarityReset.addEventListener('click', () => applyRarity(null));
+        rarityRow.append(...rarityButtons, rarityReset);
+        syncRarity();
+
         const toolbar = document.createElement('div');
         toolbar.className = 'wm-family-toolbar';
         toolbar.innerHTML = '<span data-role="count"></span>';
@@ -2738,7 +3024,7 @@
           return wrap;
         }
 
-        wrap.append(top, editBanner, heading, progress, filters, toolbar, empty, grid, more);
+        wrap.append(top, editBanner, heading, progress, filters, rarityRow, toolbar, empty, grid, more);
         requestAnimationFrame(() => renderDetailGrid(family, wrap));
         return wrap;
       }
@@ -3520,6 +3806,7 @@
             activeFamilyId = family.id;
             editingFamilyId = null;
             currentFilter = 'all';
+            currentRarity = null;
             visibleCount = CARD_BATCH;
             searchState = createEmptySearchState(family.id);
 
@@ -3609,6 +3896,7 @@
           activeFamilyId = family.id;
           editingFamilyId = family.id;
           currentFilter = 'all';
+          currentRarity = null;
           visibleCount = CARD_BATCH;
           searchState = createEmptySearchState(family.id);
           overlay.remove();
@@ -3640,7 +3928,8 @@
 
       return {
         render,
-        isThemePage
+        isThemePage,
+        renderCardPrice
       };
     }
   };
