@@ -1553,6 +1553,110 @@ html.wm-theme-route main > :not(#wm-theme-tracker-page) {
   font-weight: 850;
 }
 
+.wm-family-market-offer-copy .wm-family-market-offer-bid {
+  color: var(--wm-family-muted);
+  font-weight: 700;
+}
+
+.wm-family-market-offer-copy .wm-family-market-offer-bid[data-bids="yes"] {
+  color: rgb(216, 180, 254);
+}
+
+.wm-family-market-filters {
+  margin: 0 0 12px;
+}
+
+.wm-family-bid-modal {
+  width: min(440px, 100%);
+}
+
+.wm-family-bid-meta {
+  margin: 4px 0 12px;
+  color: var(--wm-family-muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.wm-family-bid-status {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.wm-family-bid-notice {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(250, 204, 21, 0.26);
+  border-radius: 8px;
+  background: rgba(113, 63, 18, 0.1);
+  color: #fde68a;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.wm-family-bid-notice[hidden],
+.wm-family-bid-feedback[hidden] {
+  display: none;
+}
+
+.wm-family-bid-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wm-family-bid-form label {
+  display: grid;
+  gap: 5px;
+}
+
+.wm-family-bid-hint {
+  color: var(--wm-family-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.wm-family-bid-hint[data-state="error"] {
+  color: #fca5a5;
+}
+
+.wm-family-bid-feedback {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.wm-family-bid-feedback[data-kind="error"] {
+  border-color: rgba(248, 113, 113, 0.34);
+  background: rgba(127, 29, 29, 0.12);
+  color: #fca5a5;
+}
+
+.wm-family-bid-feedback[data-kind="success"] {
+  border-color: rgba(74, 222, 128, 0.32);
+  background: rgba(20, 83, 45, 0.14);
+  color: #86efac;
+}
+
+.wm-family-bid-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.wm-family-bid-actions a {
+  text-decoration: none;
+}
+
 .wm-family-market-arrow {
   color: rgb(167, 139, 250);
   font-size: 13px;

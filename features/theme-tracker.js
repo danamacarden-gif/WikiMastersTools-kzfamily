@@ -9,6 +9,7 @@
         registerCards
       } = runtime.core;
       const familyLogic = runtime.familyLogic;
+      const bidLogic = runtime.myBidsLogic;
 
       const PAGE_ID = 'wm-theme-tracker-page';
       const NAV_ID = 'wm-theme-tracker-nav';
@@ -32,6 +33,8 @@
       let marketState = createEmptyMarketState();
       // Cartes cochées dans la modale d'ajout (id -> carte), conservées d'une page de résultats à l'autre.
       let pickerSelection = new Map();
+      // Filtre du Marché des cartes manquantes : 'all' ou 'auctions' (enchères en cours).
+      let marketFilter = 'all';
 
       function createEmptyMarketState(familyId = null) {
         return {
@@ -1091,6 +1094,7 @@
 
         if (marketState.familyId !== family.id) {
           marketState = createEmptyMarketState(family.id);
+          marketFilter = 'all';
         }
 
         renderPageContent();
@@ -1525,14 +1529,34 @@
         requestAnimationFrame(() => runtime.cardExtras.renderCardExtras());
       }
 
-      function createMarketplaceOffer(auction) {
+      function createMarketplaceOffer(auction, onOpen = null) {
         const link = document.createElement('a');
         link.className = 'wm-family-market-offer';
         link.href = `/marketplace/${encodeURIComponent(auction.id)}`;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
 
-        const priceValue = marketplacePrice(auction);
+        // Clic simple : modale de mise, sans quitter la famille. Ctrl/Cmd/Maj/clic
+        // milieu gardent le comportement normal du lien (ouvrir l'annonce).
+        if (typeof onOpen === 'function') {
+          link.title = 'Miser sans quitter la famille (Ctrl+clic pour ouvrir l’annonce)';
+          link.addEventListener('click', (event) => {
+            if (
+              event.defaultPrevented || event.button !== 0 ||
+              event.ctrlKey || event.metaKey || event.shiftKey || event.altKey
+            ) {
+              return;
+            }
+
+            event.preventDefault();
+            onOpen();
+          });
+        }
+
+        const bidInfo = familyLogic.auctionBidInfo(auction);
+        const priceValue = bidInfo.hasBids && bidInfo.highest != null
+          ? bidInfo.highest
+          : marketplacePrice(auction);
         const price = document.createElement('strong');
         price.textContent = priceValue == null
           ? 'Voir l’annonce'
@@ -1562,8 +1586,340 @@
         copy.className = 'wm-family-market-offer-copy';
         copy.append(price, meta);
 
+        // Mises : n'affirme rien si l'API n'a renvoyé aucun champ de mise.
+        if (bidInfo.known) {
+          const format = (value) => new Intl.NumberFormat('fr-FR').format(value);
+          const bid = document.createElement('span');
+          bid.className = 'wm-family-market-offer-bid';
+          bid.dataset.bids = bidInfo.hasBids ? 'yes' : 'no';
+
+          if (bidInfo.hasBids) {
+            const startCopy = bidInfo.start != null && bidInfo.start !== bidInfo.highest
+              ? ` • départ ${format(bidInfo.start)}`
+              : '';
+            bid.textContent = bidInfo.highest != null
+              ? `Enchère la plus haute${startCopy}`
+              : 'Déjà misée';
+          } else {
+            bid.textContent = 'Aucune mise • prix de départ';
+          }
+
+          copy.append(bid);
+        }
+
         link.append(copy, badges, arrow);
         return link;
+      }
+
+      // Remplace une annonce dans les résultats du Marché (après une mise ou un rafraîchissement).
+      function replaceMarketListing(familyIdValue, cardId, auction) {
+        const listings = marketCardState(cardId).listings || [];
+        setMarketCardState(familyIdValue, cardId, {
+          listings: listings.map((item) => (item.id === auction.id ? { ...item, ...auction } : item))
+        });
+      }
+
+      // Modale de mise : même appel que « Mes enchères » (POST /api/marketplace/{id}/bid),
+      // sans quitter la famille. Une mise = un clic explicite sur le bouton qui affiche le montant.
+      function openBidModal(familyIdValue, cardId, auctionId) {
+        if (document.querySelector('.wm-family-bid-overlay')) return;
+
+        const family = getFamily(familyIdValue);
+        const card = family?.cards.find((item) => item.id === cardId);
+        let auction = (marketCardState(cardId).listings || []).find((item) => item.id === auctionId);
+        if (!family || !card || !auction) return;
+
+        const format = (value) => new Intl.NumberFormat('fr-FR').format(value);
+
+        let userId = null;
+        try {
+          userId = bidLogic.parseUserIdFromCookies(document.cookie);
+        } catch (_) {}
+
+        let balance = null;
+        let pending = false;
+        let touched = false;
+        let minimumOverride = null;
+        let message = null;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'wm-family-modal-overlay wm-family-bid-overlay';
+
+        const modal = document.createElement('div');
+        modal.className = 'wm-family-modal wm-family-bid-modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-label', `Miser sur ${card.title}`);
+
+        const title = document.createElement('h2');
+        title.textContent = card.title;
+
+        const meta = document.createElement('p');
+        meta.className = 'wm-family-bid-meta';
+
+        const status = document.createElement('div');
+        status.className = 'wm-family-bid-status';
+        status.dataset.role = 'bid-status';
+
+        const notice = document.createElement('div');
+        notice.className = 'wm-family-bid-notice';
+        notice.dataset.role = 'bid-notice';
+        notice.hidden = true;
+
+        const form = document.createElement('form');
+        form.className = 'wm-family-bid-form';
+
+        const label = document.createElement('label');
+        const labelText = document.createElement('span');
+        labelText.textContent = 'Ta mise (WikiBidous)';
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = '1';
+        input.min = '1';
+        input.inputMode = 'numeric';
+        input.autocomplete = 'off';
+        input.dataset.role = 'bid-amount';
+        label.append(labelText, input);
+
+        const hint = document.createElement('div');
+        hint.className = 'wm-family-bid-hint';
+        hint.dataset.role = 'bid-hint';
+
+        const submit = document.createElement('button');
+        submit.type = 'submit';
+        submit.className = 'wm-family-primary';
+        submit.dataset.role = 'bid-submit';
+
+        form.append(label, hint, submit);
+
+        const feedback = document.createElement('div');
+        feedback.className = 'wm-family-bid-feedback';
+        feedback.dataset.role = 'bid-feedback';
+        feedback.setAttribute('role', 'status');
+        feedback.setAttribute('aria-live', 'polite');
+        feedback.hidden = true;
+
+        const actions = document.createElement('div');
+        actions.className = 'wm-family-bid-actions';
+
+        const open = document.createElement('a');
+        open.className = 'wm-family-link-button';
+        open.href = `/marketplace/${encodeURIComponent(auctionId)}`;
+        open.target = '_blank';
+        open.rel = 'noopener noreferrer';
+        open.textContent = 'Ouvrir l’annonce ↗';
+
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'wm-family-secondary';
+        close.textContent = 'Fermer';
+
+        actions.append(open, close);
+        modal.append(title, meta, status, notice, form, feedback, actions);
+        overlay.append(modal);
+
+        // Le minimum annoncé par le serveur ne vaut que pour le niveau de prix où il a été
+        // reçu : si quelqu'un surenchérit, on revient au calcul (+10 %).
+        const minimumBid = () => {
+          const computed = bidLogic.nextBidAmount(auction);
+          const hint = minimumOverride;
+          return hint && hint.price === bidLogic.currentPrice(auction)
+            ? Math.max(computed, hint.amount)
+            : computed;
+        };
+
+        function render() {
+          const now = Date.now();
+          const live = familyLogic.isLiveAuction(auction, now);
+          const info = familyLogic.auctionBidInfo(auction);
+          const minimum = minimumBid();
+
+          const seller = auction?.seller?.username ? `par ${auction.seller.username}` : '';
+          const end = formatMarketplaceEnd(auction?.end_at);
+          const hasEnd = Number.isFinite(Date.parse(auction?.end_at));
+          const remaining = !live
+            ? 'terminée'
+            : hasEnd ? `reste ${bidLogic.formatRemaining(bidLogic.remainingMs(auction, now))}` : '';
+          meta.textContent = [seller, end ? `fin ${end}` : '', remaining].filter(Boolean).join(' • ');
+
+          if (info.known && info.hasBids) {
+            status.textContent = info.highest != null
+              ? `Enchère la plus haute : ${format(info.highest)} WikiBidous${
+                info.start != null && info.start !== info.highest ? ` (départ ${format(info.start)})` : ''}`
+              : 'Déjà misée (montant indisponible)';
+          } else if (info.known) {
+            status.textContent = `Aucune mise pour l’instant • prix de départ ${format(info.start ?? bidLogic.currentPrice(auction))} WikiBidous`;
+          } else {
+            status.textContent = `Prix actuel : ${format(bidLogic.currentPrice(auction))} WikiBidous`;
+          }
+
+          const leading = bidLogic.bidStatus(auction, userId) === 'leading';
+          notice.hidden = !leading;
+          notice.textContent = leading
+            ? 'Tu mènes déjà cette enchère : miser à nouveau ne ferait que monter ton propre prix.'
+            : '';
+
+          if (!touched && input.value !== String(minimum)) input.value = String(minimum);
+          input.min = String(minimum);
+          input.disabled = pending || !live;
+
+          const validation = familyLogic.validateBid(input.value, minimum, balance);
+          const problem = touched && !validation.ok
+            ? ({
+              invalid: 'Entre un nombre entier.',
+              'below-minimum': `Minimum : ${format(minimum)} WikiBidous.`,
+              'insufficient-balance': 'Solde insuffisant.'
+            })[validation.reason]
+            : '';
+
+          hint.dataset.state = problem ? 'error' : '';
+          hint.textContent = problem || [
+            `Mise minimale : ${format(minimum)} WikiBidous`,
+            balance != null ? `Ton solde : ${format(balance)}` : ''
+          ].filter(Boolean).join(' • ');
+
+          submit.disabled = pending || !live || !validation.ok;
+          submit.textContent = pending
+            ? 'Envoi…'
+            : validation.ok ? `Miser ${format(validation.amount)} WikiBidous` : 'Miser';
+
+          const shown = message || (!live ? { kind: 'error', text: 'Cette enchère est terminée.' } : null);
+          feedback.hidden = !shown;
+          feedback.dataset.kind = shown?.kind || '';
+          feedback.textContent = shown?.text || '';
+        }
+
+        async function refreshAuction() {
+          try {
+            const json = await fetchJson(`/api/marketplace/${encodeURIComponent(auctionId)}`, {
+              credentials: 'include'
+            });
+            const fresh = json?.auction;
+
+            if (fresh && typeof fresh === 'object' && (fresh.id ?? auctionId) === auctionId) {
+              auction = { ...auction, ...fresh };
+              replaceMarketListing(family.id, card.id, auction);
+            }
+          } catch (_) {
+            // On garde l'état de la recherche si l'annonce n'a pas pu être relue.
+          }
+        }
+
+        async function refreshBalance() {
+          try {
+            const json = await fetchJson('/api/wikibidous', { credentials: 'include' });
+            const value = Number(json?.balance);
+            if (Number.isFinite(value)) balance = value;
+          } catch (_) {}
+        }
+
+        function refreshBackground() {
+          if (marketFamilyId === family.id) renderPageContent();
+        }
+
+        async function submitBid() {
+          if (pending) return;
+
+          const validation = familyLogic.validateBid(input.value, minimumBid(), balance);
+          if (!validation.ok || !familyLogic.isLiveAuction(auction)) return;
+
+          pending = true;
+          message = null;
+          render();
+
+          try {
+            const response = await fetch(`/api/marketplace/${encodeURIComponent(auctionId)}/bid`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ amount: validation.amount })
+            });
+
+            let json = null;
+            try {
+              json = await response.json();
+            } catch (_) {}
+
+            if (response.status === 401) {
+              message = { kind: 'error', text: 'Session expirée, reconnecte-toi à WikiMasters.' };
+            } else if (!response.ok) {
+              const text = String(json?.error || json?.message || `Mise refusée (HTTP ${response.status}).`);
+              const minimum = bidLogic.parseMinimumFromError(text);
+
+              if (minimum) {
+                minimumOverride = { price: bidLogic.currentPrice(auction), amount: minimum };
+                touched = false;
+              }
+
+              message = { kind: 'error', text };
+              // Quelqu'un a pu surenchérir entre-temps : on relit l'état réel.
+              await refreshAuction();
+              refreshBackground();
+            } else {
+              auction = bidLogic.applyBidResult(auction, json, validation.amount, userId);
+
+              const newBalance = Number(json?.bidder_balance);
+              if (Number.isFinite(newBalance)) balance = newBalance;
+
+              replaceMarketListing(family.id, card.id, auction);
+              refreshBackground();
+
+              minimumOverride = null;
+              touched = false;
+              message = { kind: 'success', text: `Mise de ${format(validation.amount)} WikiBidous enregistrée.` };
+            }
+          } catch (_) {
+            message = { kind: 'error', text: 'Erreur réseau : vérifie l’état de l’enchère avant de réessayer.' };
+            await refreshAuction();
+            refreshBackground();
+          } finally {
+            pending = false;
+            if (overlay.isConnected) render();
+          }
+        }
+
+        let timer = null;
+        const onKeydown = (event) => {
+          if (event.key !== 'Escape') return;
+          event.stopPropagation();
+          closeModal();
+        };
+
+        function closeModal() {
+          clearInterval(timer);
+          document.removeEventListener('keydown', onKeydown, true);
+          overlay.remove();
+        }
+
+        close.addEventListener('click', closeModal);
+        overlay.addEventListener('click', (event) => {
+          if (event.target === overlay) closeModal();
+        });
+        input.addEventListener('input', () => {
+          touched = true;
+          message = null;
+          render();
+        });
+        form.addEventListener('submit', (event) => {
+          event.preventDefault();
+          submitBid();
+        });
+
+        document.body.append(overlay);
+        document.addEventListener('keydown', onKeydown, true);
+        timer = setInterval(() => {
+          if (overlay.isConnected) render();
+        }, 1000);
+
+        render();
+        input.focus();
+
+        // Relit l'annonce et le solde : la recherche peut dater de plusieurs minutes.
+        Promise.all([refreshAuction(), refreshBalance()]).then(() => {
+          if (!overlay.isConnected) return;
+          render();
+          refreshBackground();
+        });
       }
 
       function buildMarketplacePanel(family) {
@@ -1610,6 +1966,11 @@
           return Array.isArray(state.listings) && state.listings.length > 0;
         }).length;
 
+        const liveNow = Date.now();
+        const liveCount = missingCards.filter((card) =>
+          familyLogic.liveListings(marketCardState(card.id).listings, liveNow).length > 0
+        ).length;
+
         if (marketState.batchLoading) {
           summary.dataset.mode = 'loading';
           summary.textContent = marketState.batchProgress || 'Recherche des cartes manquantes…';
@@ -1624,12 +1985,40 @@
 
         panel.append(summary);
 
+        // Filtre disponible dès qu'une recherche a été lancée.
+        if (searchedCount > 0) {
+          const marketFilters = document.createElement('div');
+          marketFilters.className = 'wm-family-filters wm-family-market-filters';
+
+          for (const [key, text, count] of [
+            ['all', 'Toutes', missingCards.length],
+            ['auctions', 'Enchères en cours', liveCount]
+          ]) {
+            const filterButton = document.createElement('button');
+            filterButton.type = 'button';
+            filterButton.dataset.marketFilter = key;
+            filterButton.classList.toggle('is-active', marketFilter === key);
+            const countEl = document.createElement('strong');
+            countEl.textContent = Number(count).toLocaleString('fr-FR');
+            filterButton.append(`${text} `, countEl);
+            filterButton.addEventListener('click', () => {
+              marketFilter = key;
+              renderPageContent();
+            });
+            marketFilters.append(filterButton);
+          }
+
+          panel.append(marketFilters);
+        }
+
         const groups = document.createElement('div');
         groups.className = 'wm-family-market-groups';
 
         for (const card of missingCards) {
           const state = marketCardState(card.id);
-          const offers = [...(state.listings || [])].sort((a, b) => {
+          const offers = [...(marketFilter === 'auctions'
+            ? familyLogic.liveListings(state.listings, liveNow)
+            : (state.listings || []))].sort((a, b) => {
             const endA = Date.parse(a?.end_at || '');
             const endB = Date.parse(b?.end_at || '');
             const validA = Number.isFinite(endA);
@@ -1645,6 +2034,8 @@
 
             return 0;
           });
+
+          if (marketFilter === 'auctions' && !offers.length) continue;
 
           const group = document.createElement('article');
           group.className = 'wm-family-market-card';
@@ -1723,7 +2114,7 @@
 
             const visibleOffers = offers.slice(0, 4);
             for (const offer of visibleOffers) {
-              offerList.append(createMarketplaceOffer(offer));
+              offerList.append(createMarketplaceOffer(offer, () => openBidModal(family.id, card.id, offer.id)));
             }
 
             if (offers.length > visibleOffers.length) {
@@ -1736,7 +2127,7 @@
 
               const extra = document.createElement('div');
               for (const offer of offers.slice(visibleOffers.length)) {
-                extra.append(createMarketplaceOffer(offer));
+                extra.append(createMarketplaceOffer(offer, () => openBidModal(family.id, card.id, offer.id)));
               }
 
               details.append(summaryMore, extra);
@@ -1747,6 +2138,13 @@
           }
 
           groups.append(group);
+        }
+
+        if (marketFilter === 'auctions' && !groups.childElementCount) {
+          const none = document.createElement('div');
+          none.className = 'wm-family-market-card-status';
+          none.textContent = 'Aucune carte manquante avec une enchère en cours.';
+          groups.append(none);
         }
 
         panel.append(groups);
