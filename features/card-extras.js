@@ -800,16 +800,22 @@
             <line x1="5" x2="9" y1="14" y2="18"></line>
             <line x1="7" x2="4" y1="17" y2="20"></line>
             <line x1="3" x2="5" y1="19" y2="21"></line>
-          </svg>
-          <span class="font-bold text-black/90">${formatStat(meta.atk)}</span>`;
+          </svg>`;
+        const attackValue = document.createElement('span');
+        attackValue.className = 'font-bold text-black/90';
+        attackValue.textContent = formatStat(meta.atk);
+        attack.append(attackValue);
 
         const defense = document.createElement('div');
         defense.className = 'text-[10px] flex items-center gap-1';
         defense.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield size-[1em] shrink-0 text-blue-800" aria-hidden="true">
             <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path>
-          </svg>
-          <span class="font-bold text-black/90">${formatStat(meta.def)}</span>`;
+          </svg>`;
+        const defenseValue = document.createElement('span');
+        defenseValue.className = 'font-bold text-black/90';
+        defenseValue.textContent = formatStat(meta.def);
+        defense.append(defenseValue);
 
         statsRow.append(attack, defense);
         statsWrap.append(statsRow);
