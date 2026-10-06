@@ -1368,13 +1368,6 @@ html.wm-theme-route main > :not(#wm-theme-tracker-page) {
 
 
 /* v4.26 — marché des cartes manquantes */
-.wm-family-dev-note {
-  margin: 0 0 8px;
-  color: color-mix(in srgb, var(--color-foreground) 42%, transparent);
-  font-size: 10px;
-  line-height: 1.35;
-}
-
 .wm-family-market-toggle {
   position: relative;
 }
