@@ -336,6 +336,7 @@
         renderMarketplaceAverage(id);
 
         runtime.packs?.onPriceUpdated(id);
+        runtime.themeTracker?.renderCardPrice?.(id);
         runtime.trades?.renderTradeDetailCard(id);
 
         if (id === globalCollectionCardId) {

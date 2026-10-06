@@ -199,3 +199,32 @@ test('validateBid ne bloque pas sur un solde ou un minimum inconnus', () => {
 test('validateBid : le minimum prime sur le solde quand les deux sont violés', () => {
   assert.equal(logic.validateBid('5', 61, 3).reason, 'below-minimum');
 });
+
+test('filterCards combine propriété et rareté sans modifier la liste', () => {
+  const logic = create();
+  const cards = [
+    { id: 'a', rarity: 'L', owned: true },
+    { id: 'b', rarity: 'L', owned: false },
+    { id: 'c', rarity: 'C', owned: true },
+    { id: 'd', rarity: 'C' }
+  ];
+  const ids = (list) => list.map((card) => card.id);
+
+  assert.deepEqual(ids(logic.filterCards(cards)), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(ids(logic.filterCards(cards, { ownership: 'owned' })), ['a', 'c']);
+  assert.deepEqual(ids(logic.filterCards(cards, { ownership: 'missing' })), ['b']);
+  assert.deepEqual(ids(logic.filterCards(cards, { ownership: 'unchecked' })), ['d']);
+  assert.deepEqual(ids(logic.filterCards(cards, { rarity: 'L' })), ['a', 'b']);
+  assert.deepEqual(ids(logic.filterCards(cards, { ownership: 'owned', rarity: 'C' })), ['c']);
+  assert.deepEqual(ids(logic.filterCards(cards, { rarity: '' })), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(logic.filterCards(null), []);
+  assert.equal(cards.length, 4);
+});
+
+test('rarityCounts compte par code et ignore les raretés inconnues', () => {
+  const counts = create().rarityCounts([
+    { rarity: 'L' }, { rarity: 'L' }, { rarity: 'PC' }, { rarity: 'X' }, { rarity: null }, null
+  ]);
+
+  assert.deepEqual(counts, { L: 2, UR: 0, SR: 0, R: 0, PC: 1, C: 0 });
+});
