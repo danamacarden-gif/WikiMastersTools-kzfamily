@@ -1670,27 +1670,31 @@
         form.className = 'wm-family-bid-form';
 
         const label = document.createElement('label');
-        const labelText = document.createElement('span');
-        labelText.textContent = 'Ta mise (WikiBidous)';
+        label.textContent = 'Ta mise (WikiBidous)';
         const input = document.createElement('input');
         input.type = 'number';
         input.step = '1';
         input.min = '1';
         input.inputMode = 'numeric';
         input.autocomplete = 'off';
+        input.id = 'wm-family-bid-amount';
         input.dataset.role = 'bid-amount';
-        label.append(labelText, input);
-
-        const hint = document.createElement('div');
-        hint.className = 'wm-family-bid-hint';
-        hint.dataset.role = 'bid-hint';
+        label.htmlFor = input.id;
 
         const submit = document.createElement('button');
         submit.type = 'submit';
         submit.className = 'wm-family-primary';
         submit.dataset.role = 'bid-submit';
 
-        form.append(label, hint, submit);
+        const row = document.createElement('div');
+        row.className = 'wm-family-bid-row';
+        row.append(input, submit);
+
+        const hint = document.createElement('div');
+        hint.className = 'wm-family-bid-hint';
+        hint.dataset.role = 'bid-hint';
+
+        form.append(label, row, hint);
 
         const feedback = document.createElement('div');
         feedback.className = 'wm-family-bid-feedback';
@@ -1703,7 +1707,7 @@
         actions.className = 'wm-family-bid-actions';
 
         const open = document.createElement('a');
-        open.className = 'wm-family-link-button';
+        open.className = 'wm-family-secondary wm-family-bid-open';
         open.href = `/marketplace/${encodeURIComponent(auctionId)}`;
         open.target = '_blank';
         open.rel = 'noopener noreferrer';
