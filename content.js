@@ -103,8 +103,8 @@
   runtime.collectionBulk = featureRegistry.collectionBulk.create(runtime);
   runtime.extraTools = featureRegistry.extraTools.create(runtime);
   runtime.familyLogic = featureRegistry.familyLogic.create();
-  runtime.themeTracker = featureRegistry.themeTracker.create(runtime);
   runtime.myBidsLogic = featureRegistry.myBidsLogic.create();
+  runtime.themeTracker = featureRegistry.themeTracker.create(runtime);
   runtime.myBids = featureRegistry.myBids.create(runtime);
   runtime.app = featureRegistry.app.create(runtime);
 
