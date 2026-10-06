@@ -1619,10 +1619,179 @@
         });
       }
 
+      // Styles de la modale de mise, injectés par le JS lui-même : ils ne peuvent donc pas être
+      // désynchronisés du balisage (le CSS du manifest, lui, n'est rechargé qu'avec l'extension).
+      // adoptedStyleSheets n'est pas bloqué par la CSP de la page, contrairement à un <style> inline.
+      const BID_MODAL_CSS = `
+.wm-family-bid-modal {
+  box-sizing: border-box;
+  width: min(440px, 100%);
+}
+
+.wm-family-bid-meta {
+  margin: 4px 0 12px;
+  color: var(--wm-family-muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.wm-family-bid-status {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.wm-family-bid-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(139, 92, 246, 0.38);
+  border-radius: 10px;
+  background: rgba(124, 58, 237, 0.12);
+  color: rgb(221, 214, 254);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.wm-family-bid-notice::before {
+  content: "i";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: rgb(139, 92, 246);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  font-style: italic;
+  line-height: 16px;
+  text-align: center;
+}
+
+.wm-family-bid-notice[hidden],
+.wm-family-bid-feedback[hidden] {
+  display: none;
+}
+
+.wm-family-bid-form {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.wm-family-bid-form label {
+  font-weight: 800;
+}
+
+.wm-family-bid-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.wm-family-bid-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wm-family-bid-row .wm-family-primary {
+  flex: none;
+  white-space: nowrap;
+}
+
+.wm-family-bid-hint {
+  color: var(--wm-family-faint, var(--wm-family-muted));
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.wm-family-bid-hint[data-state="error"] {
+  color: #fca5a5;
+}
+
+.wm-family-bid-feedback {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.wm-family-bid-feedback[data-kind="error"] {
+  border-color: rgba(248, 113, 113, 0.34);
+  background: rgba(127, 29, 29, 0.12);
+  color: #fca5a5;
+}
+
+.wm-family-bid-feedback[data-kind="success"] {
+  border-color: rgba(74, 222, 128, 0.32);
+  background: rgba(20, 83, 45, 0.14);
+  color: #86efac;
+}
+
+.wm-family-bid-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.wm-family-bid-actions > * {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-align: center;
+  text-decoration: none;
+}
+
+@media (max-width: 420px) {
+  .wm-family-bid-row {
+    flex-wrap: wrap;
+  }
+
+  .wm-family-bid-row input,
+  .wm-family-bid-row .wm-family-primary {
+    flex: 1 1 100%;
+  }
+}
+`;
+      let bidStyleSheet = null;
+
+      function ensureBidModalStyles() {
+        try {
+          if (!bidStyleSheet) {
+            bidStyleSheet = new CSSStyleSheet();
+            bidStyleSheet.replaceSync(BID_MODAL_CSS);
+          }
+          if (!document.adoptedStyleSheets.includes(bidStyleSheet)) {
+            document.adoptedStyleSheets = [...document.adoptedStyleSheets, bidStyleSheet];
+          }
+          return;
+        } catch (_) {
+          // navigateur sans feuilles constructibles : repli sur un <style>
+        }
+
+        if (document.getElementById('wm-family-bid-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'wm-family-bid-styles';
+        style.textContent = BID_MODAL_CSS;
+        document.head.append(style);
+      }
+
       // Modale de mise : même appel que « Mes enchères » (POST /api/marketplace/{id}/bid),
       // sans quitter la famille. Une mise = un clic explicite sur le bouton qui affiche le montant.
       function openBidModal(familyIdValue, cardId, auctionId) {
         if (document.querySelector('.wm-family-bid-overlay')) return;
+        ensureBidModalStyles();
 
         const family = getFamily(familyIdValue);
         const card = family?.cards.find((item) => item.id === cardId);
