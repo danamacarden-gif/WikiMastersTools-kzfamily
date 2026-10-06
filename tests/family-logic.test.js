@@ -228,3 +228,83 @@ test('rarityCounts compte par code et ignore les raretés inconnues', () => {
 
   assert.deepEqual(counts, { L: 2, UR: 0, SR: 0, R: 0, PC: 1, C: 0 });
 });
+
+const U = '025afa97-c709-46dd-9738-71f786162516';
+const C = (n) => `6f071e62-1b53-45f9-af1d-8731d5b0b35${n}`;
+const BASE = 'https://x.supabase.co/rest/v1/';
+
+test('planWishlistSync ajoute les manquantes, retire les possédées, ignore le reste', () => {
+  const plan = create().planWishlistSync([
+    { id: C(1), owned: false },
+    { id: C(2), owned: false },
+    { id: C(3), owned: true },
+    { id: C(4), owned: true },
+    { id: C(5) },
+    { id: C(1), owned: false },
+    { id: 'pas-un-uuid', owned: false }
+  ], new Set([C(2), C(3), C(9)]));
+
+  assert.deepEqual(plan.toAdd.map((c) => c.id), [C(1)]);
+  assert.deepEqual(plan.toRemove.map((c) => c.id), [C(3)]);
+  assert.equal(plan.alreadyWished, 1);
+  assert.equal(plan.unchecked, 1);
+});
+
+test('planWishlistSync ne touche jamais une carte absente de la famille', () => {
+  const plan = create().planWishlistSync([{ id: C(1), owned: true }], [C(7), C(8)]);
+  assert.deepEqual(plan.toRemove, []);
+  assert.deepEqual(plan.toAdd, []);
+});
+
+test('chunk découpe sans modifier la liste', () => {
+  const list = [1, 2, 3, 4, 5];
+  assert.deepEqual(create().chunk(list, 2), [[1, 2], [3, 4], [5]]);
+  assert.deepEqual(create().chunk([], 3), []);
+  assert.equal(list.length, 5);
+});
+
+test('URLs et corps Supabase : format attendu, identifiants validés', () => {
+  const logic = create();
+
+  assert.equal(
+    logic.wishlistDeleteUrl(BASE, U, [C(1), C(2), 'x;drop']),
+    `${BASE}wishlist_items?user_id=eq.${U}&card_id=in.(${C(1)},${C(2)})`
+  );
+  assert.equal(logic.wishlistDeleteUrl(BASE, 'nope', [C(1)]), null);
+  assert.equal(logic.wishlistDeleteUrl(BASE, U, ['x']), null);
+  assert.deepEqual(logic.wishlistInsertBody(U, [C(1), C(1), 'x']), [{ user_id: U, card_id: C(1) }]);
+  assert.equal(logic.wishlistInsertBody(U, []), null);
+  assert.equal(
+    logic.wishlistReadUrl(BASE, U, 1000),
+    `${BASE}wishlist_items?select=card_id&user_id=eq.${U}&order=card_id.asc&limit=1000&offset=1000`
+  );
+  assert.equal(logic.wishlistReadUrl(BASE, 'nope'), null);
+});
+
+test('sortByNextEnd : fin la plus proche d\'abord, sans enchère en dernier, alphabétique à égalité', () => {
+  const logic = create();
+  const now = Date.parse('2026-10-06T12:00:00Z');
+  const at = (hours) => new Date(now + hours * 3600000).toISOString();
+  const live = (hours) => ({ status: 'active', end_at: at(hours) });
+  const cards = [
+    { id: 'z', title: 'Zèbre' },
+    { id: 'a', title: 'Aigle' },
+    { id: 'b', title: 'Bison' },
+    { id: 'c', title: 'Chat' },
+    { id: 'd', title: 'Dingo' }
+  ];
+  const listings = {
+    z: [live(5)],
+    a: [live(30), live(2)],            // sa plus proche fin : 2 h
+    b: [{ status: 'active', end_at: at(-1) }],  // déjà terminée : ignorée
+    c: [],                              // aucune annonce
+    d: [live(5)]                        // égalité avec Zèbre -> alphabétique
+  };
+  const sorted = logic.sortByNextEnd(cards, (card) => listings[card.id], now);
+
+  assert.deepEqual(sorted.map((c) => c.id), ['a', 'd', 'z', 'b', 'c']);
+  assert.deepEqual(cards.map((c) => c.id), ['z', 'a', 'b', 'c', 'd']);
+  assert.equal(logic.nextEndTime([live(3), live(1)], now), now + 3600000);
+  assert.equal(logic.nextEndTime([], now), null);
+  assert.deepEqual(logic.sortByNextEnd(null, () => [], now), []);
+});

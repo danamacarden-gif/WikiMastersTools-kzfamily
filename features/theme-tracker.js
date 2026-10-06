@@ -23,6 +23,13 @@
       const MARKET_PAGE_SIZE = 50;
       const MARKET_BATCH_RETRIES = 3;
       const MARKET_BATCH_RETRY_DELAY = 5000;
+      // Liste de souhaits : table Supabase du site (wishlist_items), appelée avec la session de
+      // l'utilisateur comme le fait le site. La clé « anon » est la clé publique du site.
+      const SUPABASE_REST = 'https://cyrxjeppjqsxxjayfrur.supabase.co/rest/v1/';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5cnhqZXBwanFzeHhqYXlmcnVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4ODAzMzksImV4cCI6MjA4OTQ1NjMzOX0.BZluyXygNxuQGDPxFX1zG5i-cqp10CVK-8GGtuak4Rg';
+      const WISHLIST_PAGE_SIZE = 1000;
+      const WISHLIST_DELETE_CHUNK = 50;
+      const WISHLIST_INSERT_CHUNK = 100;
 
       let activeFamilyId = null;
       let editingFamilyId = null;
@@ -1488,6 +1495,228 @@
         }
       }
 
+      // ---- Liste de souhaits ---------------------------------------------------------------
+
+      async function wishlistFetch(url, init = {}) {
+        const token = bidLogic.parseAccessTokenFromCookies(document.cookie);
+        if (!token) throw new Error('Session wiki-masters introuvable : reconnecte-toi et recharge la page.');
+
+        const response = await fetch(url, {
+          ...init,
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            ...(init.headers || {})
+          }
+        });
+
+        if (response.ok) return response;
+
+        let detail = '';
+        try {
+          const body = await response.json();
+          detail = String(body?.message || body?.error || '');
+        } catch (_) {}
+
+        if (response.status === 401 || response.status === 403) {
+          throw new Error('Session expirée ou refusée : recharge la page wiki-masters puis réessaie.');
+        }
+        throw new Error(`Erreur ${response.status}${detail ? ` : ${detail}` : ''}`);
+      }
+
+      async function readWishlistIds(userId) {
+        const ids = new Set();
+
+        for (let offset = 0; ; offset += WISHLIST_PAGE_SIZE) {
+          const url = familyLogic.wishlistReadUrl(SUPABASE_REST, userId, offset, WISHLIST_PAGE_SIZE);
+          const rows = await (await wishlistFetch(url)).json();
+          if (!Array.isArray(rows)) throw new Error('Réponse inattendue du site pour la liste de souhaits.');
+
+          for (const row of rows) if (row?.card_id) ids.add(row.card_id);
+          if (rows.length < WISHLIST_PAGE_SIZE) break;
+        }
+
+        return ids;
+      }
+
+      // Retraits d'abord, puis ajouts. `done` est mis à jour au fil de l'eau pour qu'une
+      // erreur en cours de route indique ce qui a déjà été fait.
+      async function applyWishlistPlan(userId, plan, done) {
+        for (const ids of familyLogic.chunk(plan.toRemove.map((card) => card.id), WISHLIST_DELETE_CHUNK)) {
+          const url = familyLogic.wishlistDeleteUrl(SUPABASE_REST, userId, ids);
+          await wishlistFetch(url, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+          done.removed += ids.length;
+        }
+
+        for (const ids of familyLogic.chunk(plan.toAdd.map((card) => card.id), WISHLIST_INSERT_CHUNK)) {
+          const body = familyLogic.wishlistInsertBody(userId, ids);
+          await wishlistFetch(`${SUPABASE_REST}wishlist_items`, {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify(body)
+          });
+          done.added += ids.length;
+        }
+      }
+
+      function openWishlistModal(family) {
+        if (document.querySelector('.wm-family-wishlist-overlay')) return;
+        ensureInlineStyles();
+
+        const userId = bidLogic.parseUserIdFromCookies(document.cookie);
+        const plural = (n, one, many) => `${n.toLocaleString('fr-FR')} ${n > 1 ? many : one}`;
+        const done = { added: 0, removed: 0 };
+        let plan = null;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'wm-family-modal-overlay wm-family-wishlist-overlay';
+        const modal = document.createElement('div');
+        modal.className = 'wm-family-modal wm-family-wishlist-modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-label', 'Liste de souhaits');
+        overlay.append(modal);
+
+        const close = () => {
+          document.removeEventListener('keydown', onKeydown, true);
+          overlay.remove();
+        };
+        const onKeydown = (event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            close();
+          }
+        };
+        document.addEventListener('keydown', onKeydown, true);
+        overlay.addEventListener('click', (event) => {
+          if (event.target === overlay) close();
+        });
+
+        const button = (label, className, onClick, disabled = false) => {
+          const element = document.createElement('button');
+          element.type = 'button';
+          element.className = className;
+          element.textContent = label;
+          element.disabled = disabled;
+          element.addEventListener('click', onClick);
+          return element;
+        };
+
+        const line = (label, value) => {
+          const row = document.createElement('div');
+          const text = document.createElement('span');
+          text.textContent = label;
+          const count = document.createElement('strong');
+          count.textContent = Number(value).toLocaleString('fr-FR');
+          row.append(text, count);
+          return row;
+        };
+
+        const note = (text, kind = '') => {
+          const element = document.createElement('p');
+          element.className = 'wm-family-wishlist-note';
+          if (kind) element.dataset.kind = kind;
+          element.textContent = text;
+          return element;
+        };
+
+        const heading = () => {
+          const title = document.createElement('h2');
+          title.textContent = 'Liste de souhaits';
+          return title;
+        };
+
+        const actions = (...buttons) => {
+          const row = document.createElement('div');
+          row.className = 'wm-family-wishlist-actions';
+          row.append(...buttons);
+          return row;
+        };
+
+        const show = (...nodes) => modal.replaceChildren(heading(), ...nodes);
+
+        const showError = (message) => {
+          const partial = done.added || done.removed
+            ? ` Déjà fait avant l'erreur : ${plural(done.added, 'ajout', 'ajouts')}, ${plural(done.removed, 'retrait', 'retraits')}.`
+            : '';
+          show(
+            note(`${message}${partial}`, 'error'),
+            actions(
+              button('Réessayer', 'wm-family-primary', load),
+              button('Fermer', 'wm-family-secondary', close)
+            )
+          );
+        };
+
+        const showConfirm = () => {
+          const total = plan.toAdd.length + plan.toRemove.length;
+          const nodes = [
+            note(`Famille « ${family.name} ». Seules les cartes de cette famille sont concernées.`),
+            (() => {
+              const lines = document.createElement('div');
+              lines.className = 'wm-family-wishlist-lines';
+              lines.append(
+                line('À ajouter (manquantes)', plan.toAdd.length),
+                line('À retirer (désormais possédées)', plan.toRemove.length),
+                line('Déjà dans ta liste', plan.alreadyWished)
+              );
+              return lines;
+            })()
+          ];
+
+          if (plan.unchecked) {
+            nodes.push(note(
+              `${plural(plan.unchecked, 'carte « à vérifier » est ignorée', 'cartes « à vérifier » sont ignorées')} : clique sur « Charger mes cartes » pour les inclure.`,
+              'error'
+            ));
+          }
+
+          if (!total) nodes.push(note('Ta liste de souhaits est déjà à jour pour cette famille.', 'success'));
+
+          nodes.push(actions(
+            button('Synchroniser', 'wm-family-primary', run, total === 0),
+            button('Fermer', 'wm-family-secondary', close)
+          ));
+          show(...nodes);
+        };
+
+        async function run() {
+          show(note('Mise à jour de ta liste de souhaits…'));
+          try {
+            await applyWishlistPlan(userId, plan, done);
+          } catch (error) {
+            showError(String(error?.message || error));
+            return;
+          }
+
+          show(
+            note(`Terminé : ${plural(done.added, 'carte ajoutée', 'cartes ajoutées')}, ${plural(done.removed, 'carte retirée', 'cartes retirées')}.`, 'success'),
+            actions(button('Fermer', 'wm-family-secondary', close))
+          );
+        }
+
+        async function load() {
+          done.added = 0;
+          done.removed = 0;
+          show(note('Lecture de ta liste de souhaits…'));
+          try {
+            plan = familyLogic.planWishlistSync(family.cards, await readWishlistIds(userId));
+          } catch (error) {
+            showError(String(error?.message || error));
+            return;
+          }
+          showConfirm();
+        }
+
+        document.body.append(overlay);
+        if (!userId) {
+          showError('Session wiki-masters introuvable : reconnecte-toi et recharge la page.');
+        } else {
+          load();
+        }
+      }
+
       // Clic sur une carte : ouvre le Marché des cartes manquantes sur cette seule carte
       // et lance la recherche d'annonces.
       function searchCardOnMarket(family, card) {
@@ -1624,6 +1853,28 @@
         requestAnimationFrame(() => runtime.cardExtras.renderCardExtras());
       }
 
+      // Icône WikiBidous du site (cercle + W), en currentColor.
+      function createWikiBidousIcon() {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        svg.setAttribute('aria-hidden', 'true');
+
+        const circle = document.createElementNS(ns, 'circle');
+        circle.setAttribute('cx', '12');
+        circle.setAttribute('cy', '12');
+        circle.setAttribute('r', '9');
+        const letter = document.createElementNS(ns, 'path');
+        letter.setAttribute('d', 'M7.5 8.5 9.5 15.5 12 10 14.5 15.5 16.5 8.5');
+        svg.append(circle, letter);
+        return svg;
+      }
+
       function createMarketplaceOffer(auction, onOpen = null) {
         const link = document.createElement('a');
         link.className = 'wm-family-market-offer';
@@ -1653,9 +1904,12 @@
           ? bidInfo.highest
           : marketplacePrice(auction);
         const price = document.createElement('strong');
-        price.textContent = priceValue == null
-          ? 'Voir l’annonce'
-          : `${new Intl.NumberFormat('fr-FR').format(priceValue)} WikiBidous`;
+        price.className = 'wm-family-offer-price';
+        if (priceValue == null) {
+          price.textContent = 'Voir l’annonce';
+        } else {
+          price.append(createWikiBidousIcon(), `${new Intl.NumberFormat('fr-FR').format(priceValue)} WikiBidous`);
+        }
 
         const meta = document.createElement('span');
         const seller = auction?.seller?.username
@@ -1869,6 +2123,89 @@
 
 .wm-family-market-focus button {
   margin-left: auto;
+}
+
+.wm-family-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wm-family-wishlist-button {
+  margin-left: auto;
+}
+
+.wm-family-wishlist-modal {
+  display: grid;
+  gap: 12px;
+  box-sizing: border-box;
+  width: min(440px, 100%);
+}
+
+.wm-family-wishlist-modal h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.wm-family-wishlist-lines {
+  display: grid;
+  gap: 8px;
+}
+
+.wm-family-wishlist-lines > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 14px;
+}
+
+.wm-family-wishlist-lines strong {
+  font-size: 16px;
+}
+
+.wm-family-wishlist-note {
+  margin: 0;
+  color: var(--wm-family-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wm-family-wishlist-note[data-kind="error"] {
+  color: #fca5a5;
+}
+
+.wm-family-wishlist-note[data-kind="success"] {
+  color: #86efac;
+}
+
+.wm-family-wishlist-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.wm-family-wishlist-actions > * {
+  flex: 1 1 0;
+}
+
+.wm-family-market-offer .wm-family-offer-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #34d399;
+  font-weight: 800;
+}
+
+.wm-family-market-offer .wm-family-offer-price svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
 }
 
 .wm-family-bid-layout {
@@ -2629,7 +2966,12 @@
         const groups = document.createElement('div');
         groups.className = 'wm-family-market-groups';
 
-        for (const card of missingCards) {
+        // Filtre « Enchères en cours » : la fin la plus proche en premier (sinon ordre alphabétique).
+        const orderedCards = marketFilter === 'auctions'
+          ? familyLogic.sortByNextEnd(missingCards, (card) => marketCardState(card.id).listings, liveNow)
+          : missingCards;
+
+        for (const card of orderedCards) {
           const state = marketCardState(card.id);
           const offers = [...(marketFilter === 'auctions'
             ? familyLogic.liveListings(state.listings, liveNow)
@@ -3024,7 +3366,20 @@
           return wrap;
         }
 
-        wrap.append(top, editBanner, heading, progress, filters, rarityRow, toolbar, empty, grid, more);
+        const wishlistButton = document.createElement('button');
+        wishlistButton.type = 'button';
+        wishlistButton.className = 'wm-family-secondary wm-family-wishlist-button';
+        wishlistButton.dataset.role = 'wishlist-sync';
+        wishlistButton.textContent = '♡ Liste de souhaits';
+        wishlistButton.title = 'Ajouter les cartes manquantes à ta liste de souhaits et retirer celles que tu possèdes désormais';
+        wishlistButton.disabled = family.cards.length === 0;
+        wishlistButton.addEventListener('click', () => openWishlistModal(family));
+
+        const filterRow = document.createElement('div');
+        filterRow.className = 'wm-family-filter-row';
+        filterRow.append(filters, wishlistButton);
+
+        wrap.append(top, editBanner, heading, progress, filterRow, rarityRow, toolbar, empty, grid, more);
         requestAnimationFrame(() => renderDetailGrid(family, wrap));
         return wrap;
       }

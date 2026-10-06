@@ -198,3 +198,12 @@ test('alertTracker oublie les enchères qui ont disparu de la liste', () => {
   assert.deepEqual(tracker.collect([], NOW), []);
   assert.deepEqual(tracker.collect([bid], NOW), ['x']);
 });
+
+test('parseAccessTokenFromCookies lit access_token (3 segments) et refuse le reste', () => {
+  const jwt = 'aaa.bbb.ccc';
+  assert.equal(logic.parseAccessTokenFromCookies(cookieFor({ user: { id: USER }, access_token: jwt })), jwt);
+  assert.equal(logic.parseAccessTokenFromCookies(cookieFor({ user: { id: USER }, access_token: jwt.repeat(40) }, { chunks: 3 })), null);
+  assert.equal(logic.parseAccessTokenFromCookies(cookieFor({ user: { id: USER }, access_token: 'pas-un-jwt' })), null);
+  assert.equal(logic.parseAccessTokenFromCookies(cookieFor({ user: { id: USER } })), null);
+  assert.equal(logic.parseAccessTokenFromCookies(''), null);
+});

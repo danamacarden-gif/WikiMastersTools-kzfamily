@@ -7,8 +7,8 @@
   const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   function create() {
-    // Seul user.id est lu : les jetons du cookie ne sont jamais exposés.
-    function parseUserIdFromCookies(cookieString) {
+    // Lit la session Supabase du cookie. Les jetons ne sont ni journalisés ni stockés ailleurs.
+    function readAuthSession(cookieString) {
       const chunks = new Map();
 
       for (const part of String(cookieString || '').split(';')) {
@@ -42,11 +42,22 @@
           json = new TextDecoder().decode(bytes);
         }
 
-        const id = JSON.parse(json)?.user?.id;
-        return typeof id === 'string' && USER_ID_PATTERN.test(id) ? id : null;
+        const session = JSON.parse(json);
+        return session && typeof session === 'object' ? session : null;
       } catch (_) {
         return null;
       }
+    }
+
+    function parseUserIdFromCookies(cookieString) {
+      const id = readAuthSession(cookieString)?.user?.id;
+      return typeof id === 'string' && USER_ID_PATTERN.test(id) ? id : null;
+    }
+
+    // Jeton d'accès de la session Supabase du site (cookie sb-…-auth-token), ou null.
+    function parseAccessTokenFromCookies(cookieString) {
+      const token = readAuthSession(cookieString)?.access_token;
+      return typeof token === 'string' && token.split('.').length === 3 ? token : null;
     }
 
     function extractBids(json) {
@@ -167,6 +178,7 @@
 
     return {
       parseUserIdFromCookies,
+      parseAccessTokenFromCookies,
       extractBids,
       bidStatus,
       currentPrice,
