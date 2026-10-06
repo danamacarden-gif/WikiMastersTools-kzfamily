@@ -1,6 +1,6 @@
 # Politique de confidentialité — WikiMastersTools-kzfamily
 
-Dernière mise à jour : 24 septembre 2026
+Dernière mise à jour : 6 octobre 2026
 
 WikiMastersTools-kzfamily est un add-on créé par la kzfamily pour améliorer l'utilisation du site WikiMasters.
 
@@ -51,8 +51,6 @@ Les données ne sont ni vendues ni utilisées pour déterminer la solvabilité d
 L'extension fonctionne avec le site WikiMasters et son API. L'utilisation de WikiMasters reste soumise aux propres conditions et règles de confidentialité de WikiMasters.
 
 Pour la fonctionnalité d’images manquantes, l’extension utilise l’API publique de Wikipédia en français et peut afficher des images hébergées par Wikimedia Commons. Seul le titre public de la carte est utilisé pour cette recherche ; aucun cookie WikiMasters ni identifiant de compte n’est transmis à Wikimedia.
-
-Le lien sponsorisé vers Twitch affiché par l'extension est un simple lien cliquable. L'extension n'envoie aucune donnée à Twitch tant que l'utilisateur ne clique pas sur ce lien.
 
 ## Contact
 

@@ -6,7 +6,7 @@
       const {
         CACHE_TTL, BULK_RARITY_LAST_LOAD_KEY, ALL_COLLECTION_KEY, RARITIES,
         DEFAULT_RARE_RARITIES, isCollectionPage, normalizeTitle, cacheKey,
-        storageGet, storageSet, reportError, createSponsorNote, isContextInvalidatedError
+        storageGet, storageSet, reportError, isContextInvalidatedError
       } = runtime.core;
 
       let bulkActive = false;
@@ -127,7 +127,6 @@
           bar.append(rankingButton);
         }
 
-        bar.append(createSponsorNote());
         header.insertAdjacentElement('afterend', bar);
         ensurePriceLegend(bar);
       }

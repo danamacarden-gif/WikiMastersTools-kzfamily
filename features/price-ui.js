@@ -6,7 +6,7 @@
       const {
         isCollectionPage, isMarketplaceDetailPage, isGlobalCollectionPage,
         normalizeTitle, cacheKey, storageGet, isCacheEntryValid, reportError,
-        registerCards, createSponsorNote, cardMetaById, idByTitle, cacheMemory
+        registerCards, cardMetaById, idByTitle, cacheMemory
       } = runtime.core;
 
       let collectionPriceObserver = null;
@@ -298,7 +298,7 @@
           value.dataset.role = 'value';
 
           priceCard.append(labelWrap, value);
-          wrap.append(priceCard, createSponsorNote());
+          wrap.append(priceCard);
           titleBlock.insertAdjacentElement('afterend', wrap);
         }
 

@@ -9,7 +9,7 @@
         AUTO_OPEN_DEFAULT_MIN_MINUTES, AUTO_OPEN_DEFAULT_MAX_MINUTES,
         ALL_COLLECTION_KEY, cacheMemory, isPullsPage, isLastPullCardVisible,
         normalizeTitle, readLocalValue, writeLocalValue, storageGet, storageSet,
-        reportError, createSponsorNote
+        reportError
       } = runtime.core;
       const { formatAverage, chooseAverage } = runtime.priceUi;
 
@@ -441,7 +441,7 @@
           const cacheNote = document.createElement('div');
           cacheNote.className = 'wm-pulls-cache-note';
           cacheNote.textContent = 'Les prix moyens utilisés par les outils sont conservés dans le cache local.';
-          info.append(cacheNote, createSponsorNote());
+          info.append(cacheNote);
         }
 
         const pageSubtitle = [...header.children].find((el) => el.tagName === 'P');

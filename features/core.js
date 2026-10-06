@@ -256,21 +256,6 @@
         }
       }
 
-      function createSponsorNote() {
-        const note = document.createElement('div');
-        note.className = 'wm-sponsor-note';
-        note.append(document.createTextNode('bouton sponsorisé par '));
-
-        const link = document.createElement('a');
-        link.href = 'https://www.twitch.tv/botkz';
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = 'https://www.twitch.tv/botkz';
-
-        note.append(link);
-        return note;
-      }
-
 
       return {
         CACHE_TTL, ERROR_CACHE_TTL, MAX_CONCURRENT, BULK_RARITY_LAST_LOAD_KEY,
@@ -285,7 +270,7 @@
         isTradesPage, isGlobalCollectionPage, isGuildPage, isLastPullCardVisible, normalizeTitle,
         cacheKey, readLocalValue, writeLocalValue, storageGet, storageSet,
         isCacheEntryValid, cleanupPriceCacheOnceDaily, isContextInvalidatedError,
-        reportError, mergeTags, registerCards, createSponsorNote
+        reportError, mergeTags, registerCards
       };
     }
   };

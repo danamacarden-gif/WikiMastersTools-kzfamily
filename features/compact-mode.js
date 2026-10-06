@@ -52,10 +52,7 @@
         if (isCollectionPage()) {
           const bar = document.getElementById('wm-tools-bar');
           if (bar && !bar.querySelector('[data-wm-compact-button]')) {
-            const sponsor = bar.querySelector('.wm-sponsor-note');
-            const button = makeCompactButton();
-            if (sponsor) bar.insertBefore(button, sponsor);
-            else bar.append(button);
+            bar.append(makeCompactButton());
           }
         } else if (isGlobalCollectionPage() && !document.getElementById('wm-global-compact-tools')) {
           const h1 = document.querySelector('main h1');
