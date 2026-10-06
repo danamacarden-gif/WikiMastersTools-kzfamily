@@ -1624,6 +1624,28 @@
         requestAnimationFrame(() => runtime.cardExtras.renderCardExtras());
       }
 
+      // Icône WikiBidous du site (cercle + W), en currentColor.
+      function createWikiBidousIcon() {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        svg.setAttribute('aria-hidden', 'true');
+
+        const circle = document.createElementNS(ns, 'circle');
+        circle.setAttribute('cx', '12');
+        circle.setAttribute('cy', '12');
+        circle.setAttribute('r', '9');
+        const letter = document.createElementNS(ns, 'path');
+        letter.setAttribute('d', 'M7.5 8.5 9.5 15.5 12 10 14.5 15.5 16.5 8.5');
+        svg.append(circle, letter);
+        return svg;
+      }
+
       function createMarketplaceOffer(auction, onOpen = null) {
         const link = document.createElement('a');
         link.className = 'wm-family-market-offer';
@@ -1653,9 +1675,12 @@
           ? bidInfo.highest
           : marketplacePrice(auction);
         const price = document.createElement('strong');
-        price.textContent = priceValue == null
-          ? 'Voir l’annonce'
-          : `${new Intl.NumberFormat('fr-FR').format(priceValue)} WikiBidous`;
+        price.className = 'wm-family-offer-price';
+        if (priceValue == null) {
+          price.textContent = 'Voir l’annonce';
+        } else {
+          price.append(createWikiBidousIcon(), `${new Intl.NumberFormat('fr-FR').format(priceValue)} WikiBidous`);
+        }
 
         const meta = document.createElement('span');
         const seller = auction?.seller?.username
@@ -1869,6 +1894,20 @@
 
 .wm-family-market-focus button {
   margin-left: auto;
+}
+
+.wm-family-market-offer .wm-family-offer-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #34d399;
+  font-weight: 800;
+}
+
+.wm-family-market-offer .wm-family-offer-price svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
 }
 
 .wm-family-bid-layout {
