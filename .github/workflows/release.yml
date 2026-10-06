@@ -33,10 +33,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          flags=""
-          case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" \
-            "$RUNNER_TEMP/wikimasters-tools-${GITHUB_REF_NAME}.zip" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            $flags
+          zip="$RUNNER_TEMP/wikimasters-tools-${GITHUB_REF_NAME}.zip"
+          # Release déjà créée depuis l'interface GitHub : on y joint le zip.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$zip" --clobber
+          else
+            flags=""
+            case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
+            gh release create "$GITHUB_REF_NAME" "$zip" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              $flags
+          fi
