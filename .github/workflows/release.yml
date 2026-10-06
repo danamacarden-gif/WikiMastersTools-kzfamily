@@ -1,0 +1,42 @@
+name: Release
+
+# Un tag « vX.Y.Z » (ou « vX.Y.Z-rc.1 » pour une pré-release) construit un zip de
+# l'extension, prêt à être chargé en « extension non empaquetée », et publie
+# la Release GitHub correspondante.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Zip + GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tests de régression
+        run: node --test tests/*.test.js
+
+      - name: Construire le zip de l'extension
+        run: |
+          zip -r "$RUNNER_TEMP/wikimasters-tools-${GITHUB_REF_NAME}.zip" . \
+            -x ".git/*" ".github/*" "tests/*" ".gitignore" "web-ext-artifacts/*" "*.zip"
+          unzip -l "$RUNNER_TEMP/wikimasters-tools-${GITHUB_REF_NAME}.zip" | tail -3
+
+      - name: Publier la Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          flags=""
+          case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/wikimasters-tools-${GITHUB_REF_NAME}.zip" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            $flags
