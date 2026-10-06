@@ -90,7 +90,6 @@
     renderCollectionCard: runtime.priceUi.renderCollectionCard,
     reportError: runtime.core.reportError,
     loadCacheForCards: runtime.priceLoader.loadCacheForCards,
-    createSponsorNote: runtime.core.createSponsorNote,
     formatAverage: runtime.priceUi.formatAverage,
     chooseAverage: runtime.priceUi.chooseAverage,
     registerCards: runtime.core.registerCards,

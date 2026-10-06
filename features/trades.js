@@ -3,7 +3,7 @@
 
   registry.trades = {
     create(deps) {
-      const { isTradesPage, normalizeTitle, cardMetaById, idByTitle, cacheMemory, renderCollectionCard, reportError, loadCacheForCards, createSponsorNote, formatAverage, chooseAverage, registerCards, isFeatureEnabled } = deps;
+      const { isTradesPage, normalizeTitle, cardMetaById, idByTitle, cacheMemory, renderCollectionCard, reportError, loadCacheForCards, formatAverage, chooseAverage, registerCards, isFeatureEnabled } = deps;
       const tradesById = new Map();
       const activeTradeValueIds = new Set();
       let tradesRequested = false;
@@ -183,7 +183,7 @@
             }
           });
     
-          controls.append(button, createSponsorNote());
+          controls.append(button);
           cardEl.append(controls);
         }
     
