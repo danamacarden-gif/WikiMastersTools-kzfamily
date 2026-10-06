@@ -1623,6 +1623,67 @@
       // désynchronisés du balisage (le CSS du manifest, lui, n'est rechargé qu'avec l'extension).
       // adoptedStyleSheets n'est pas bloqué par la CSP de la page, contrairement à un <style> inline.
       const BID_MODAL_CSS = `
+.wm-family-rarity-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--wm-rarity-color, #d1d5db);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--wm-rarity-color, #d1d5db) 40%, transparent);
+  color: rgb(13, 17, 23);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.wm-family-rarity-badge[data-rarity="L"] { --wm-rarity-color: var(--color-rarity-l, #facc15); }
+.wm-family-rarity-badge[data-rarity="UR"] { --wm-rarity-color: var(--color-rarity-ur, #f87171); }
+.wm-family-rarity-badge[data-rarity="SR"] { --wm-rarity-color: var(--color-rarity-sr, #c084fc); }
+.wm-family-rarity-badge[data-rarity="R"] { --wm-rarity-color: var(--color-rarity-r, #60a5fa); }
+.wm-family-rarity-badge[data-rarity="PC"] { --wm-rarity-color: var(--color-rarity-pc, #34d399); }
+.wm-family-rarity-badge[data-rarity="C"] { --wm-rarity-color: var(--color-rarity-c, #d1d5db); }
+
+.wm-family-market-card-head .wm-family-market-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.wm-family-bid-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+}
+
+.wm-family-bid-card {
+  display: none;
+}
+
+.wm-family-bid-rarity {
+  margin-top: 8px;
+}
+
+@media (min-width: 620px) {
+  .wm-family-bid-modal.has-card {
+    width: min(720px, 100%);
+  }
+
+  .wm-family-bid-modal.has-card .wm-family-bid-layout {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .wm-family-bid-card {
+    display: block;
+    align-self: start;
+  }
+
+  .wm-family-bid-card .wm-family-native-card {
+    width: 200px !important;
+    height: 280px !important;
+    cursor: default;
+  }
+}
 .wm-family-bid-modal {
   --bid-accent: #34d399;
   --bid-accent-soft: rgba(52, 211, 153, 0.12);
@@ -1844,6 +1905,25 @@
 `;
       let bidStyleSheet = null;
 
+      const RARITY_LABELS = {
+        L: 'Légendaire',
+        UR: 'Ultra rare',
+        SR: 'Super rare',
+        R: 'Rare',
+        PC: 'Peu commun',
+        C: 'Commun'
+      };
+
+      function createRarityBadge(rarity) {
+        if (!Object.prototype.hasOwnProperty.call(RARITY_LABELS, rarity)) return null;
+
+        const badge = document.createElement('span');
+        badge.className = 'wm-family-rarity-badge';
+        badge.dataset.rarity = rarity;
+        badge.textContent = RARITY_LABELS[rarity];
+        return badge;
+      }
+
       function ensureBidModalStyles() {
         try {
           if (!bidStyleSheet) {
@@ -1973,7 +2053,34 @@
         closeIcon.setAttribute('aria-label', 'Fermer la fenêtre');
         closeIcon.textContent = '✕';
 
-        modal.append(title, closeIcon, meta, status, notice, form, feedback, actions);
+        const layout = document.createElement('div');
+        layout.className = 'wm-family-bid-layout';
+
+        const body = document.createElement('div');
+        body.className = 'wm-family-bid-body';
+
+        const rarityBadge = createRarityBadge(card.rarity);
+        if (rarityBadge) {
+          const rarityRow = document.createElement('div');
+          rarityRow.className = 'wm-family-bid-rarity';
+          rarityRow.append(rarityBadge);
+          body.append(title, rarityRow, meta);
+        } else {
+          body.append(title, meta);
+        }
+        body.append(status, notice, form, feedback, actions);
+
+        const cardElement = runtime.cardExtras?.createCardElement?.(card, { owned: false, ownedCount: 0 });
+        if (cardElement) {
+          const cardColumn = document.createElement('div');
+          cardColumn.className = 'wm-family-bid-card';
+          cardColumn.append(cardElement);
+          layout.append(cardColumn);
+          modal.classList.add('has-card');
+        }
+
+        layout.append(body);
+        modal.append(closeIcon, layout);
         overlay.append(modal);
 
         // Le minimum annoncé par le serveur ne vaut que pour le niveau de prix où il a été
@@ -2182,6 +2289,7 @@
       }
 
       function buildMarketplacePanel(family) {
+        ensureBidModalStyles();
         const panel = document.createElement('section');
         panel.className = 'wm-family-market-panel';
 
@@ -2337,9 +2445,10 @@
                   : 'Aucune annonce'
                 : 'Pas encore recherchée';
 
-          cardMeta.textContent = [card.rarity, stateCopy]
-            .filter(Boolean)
-            .join(' • ');
+          cardMeta.className = 'wm-family-market-card-meta';
+          const rarityBadge = createRarityBadge(card.rarity);
+          if (rarityBadge) cardMeta.append(rarityBadge);
+          cardMeta.append(document.createTextNode(stateCopy));
 
           cardCopy.append(cardTitle, cardMeta);
 
