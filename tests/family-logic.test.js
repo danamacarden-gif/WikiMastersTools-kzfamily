@@ -280,3 +280,31 @@ test('URLs et corps Supabase : format attendu, identifiants validés', () => {
   );
   assert.equal(logic.wishlistReadUrl(BASE, 'nope'), null);
 });
+
+test('sortByNextEnd : fin la plus proche d\'abord, sans enchère en dernier, alphabétique à égalité', () => {
+  const logic = create();
+  const now = Date.parse('2026-10-06T12:00:00Z');
+  const at = (hours) => new Date(now + hours * 3600000).toISOString();
+  const live = (hours) => ({ status: 'active', end_at: at(hours) });
+  const cards = [
+    { id: 'z', title: 'Zèbre' },
+    { id: 'a', title: 'Aigle' },
+    { id: 'b', title: 'Bison' },
+    { id: 'c', title: 'Chat' },
+    { id: 'd', title: 'Dingo' }
+  ];
+  const listings = {
+    z: [live(5)],
+    a: [live(30), live(2)],            // sa plus proche fin : 2 h
+    b: [{ status: 'active', end_at: at(-1) }],  // déjà terminée : ignorée
+    c: [],                              // aucune annonce
+    d: [live(5)]                        // égalité avec Zèbre -> alphabétique
+  };
+  const sorted = logic.sortByNextEnd(cards, (card) => listings[card.id], now);
+
+  assert.deepEqual(sorted.map((c) => c.id), ['a', 'd', 'z', 'b', 'c']);
+  assert.deepEqual(cards.map((c) => c.id), ['z', 'a', 'b', 'c', 'd']);
+  assert.equal(logic.nextEndTime([live(3), live(1)], now), now + 3600000);
+  assert.equal(logic.nextEndTime([], now), null);
+  assert.deepEqual(logic.sortByNextEnd(null, () => [], now), []);
+});
