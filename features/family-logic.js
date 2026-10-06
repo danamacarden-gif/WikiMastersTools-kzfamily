@@ -108,7 +108,59 @@
       return counts;
     }
 
+    // ---- Liste de souhaits -------------------------------------------------------------
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isUuid = (value) => typeof value === 'string' && UUID.test(value);
+
+    // Synchronise la liste de souhaits avec une famille : on y met les cartes manquantes
+    // qui n'y sont pas, on en retire les cartes de la famille désormais possédées. Les cartes
+    // « à vérifier » (propriété inconnue) et celles d'autres familles ne sont jamais touchées.
+    function planWishlistSync(cards, wishlistIds) {
+      const wished = wishlistIds instanceof Set ? wishlistIds : new Set(wishlistIds || []);
+      const seen = new Set();
+      const plan = { toAdd: [], toRemove: [], alreadyWished: 0, unchecked: 0 };
+
+      for (const card of Array.isArray(cards) ? cards : []) {
+        if (!card || !isUuid(card.id) || seen.has(card.id)) continue;
+        seen.add(card.id);
+
+        if (card.owned == null) plan.unchecked += 1;
+        else if (card.owned === false && wished.has(card.id)) plan.alreadyWished += 1;
+        else if (card.owned === false) plan.toAdd.push(card);
+        else if (card.owned === true && wished.has(card.id)) plan.toRemove.push(card);
+      }
+
+      return plan;
+    }
+
+    function chunk(list, size) {
+      const out = [];
+      const step = Math.max(1, Math.floor(size) || 1);
+      for (let i = 0; i < (list || []).length; i += step) out.push(list.slice(i, i + step));
+      return out;
+    }
+
+    // Requêtes PostgREST (Supabase) de la table wishlist_items. Les identifiants non-UUID
+    // sont écartés pour ne jamais injecter autre chose dans l'URL.
+    function wishlistDeleteUrl(baseUrl, userId, cardIds) {
+      const ids = (cardIds || []).filter(isUuid);
+      if (!isUuid(userId) || !ids.length) return null;
+      return `${baseUrl}wishlist_items?user_id=eq.${userId}&card_id=in.(${ids.join(',')})`;
+    }
+
+    function wishlistInsertBody(userId, cardIds) {
+      if (!isUuid(userId)) return null;
+      const ids = [...new Set((cardIds || []).filter(isUuid))];
+      return ids.length ? ids.map((cardId) => ({ user_id: userId, card_id: cardId })) : null;
+    }
+
+    function wishlistReadUrl(baseUrl, userId, offset = 0, limit = 1000) {
+      if (!isUuid(userId)) return null;
+      return `${baseUrl}wishlist_items?select=card_id&user_id=eq.${userId}&order=card_id.asc&limit=${limit}&offset=${offset}`;
+    }
+
     return {
+      planWishlistSync, chunk, wishlistDeleteUrl, wishlistInsertBody, wishlistReadUrl,
       RARITIES, pickAddable, mergeCards, auctionBidInfo, isLiveAuction, liveListings,
       validateBid, filterCards, rarityCounts
     };
