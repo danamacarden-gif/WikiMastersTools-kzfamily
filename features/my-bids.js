@@ -9,12 +9,20 @@
       const SETTING_KEY = 'myBids';
 
       const SOUND_KEY = 'wm_my_bids_sound_v1';
+      const AUTO_KEY = 'wm_auto_bids_v1';
+      // Dans les 45 dernières secondes d'une enchère armée, on relit la liste toutes les 1,5 s.
+      const FAST_WINDOW_MS = 45 * 1000;
+      const FAST_REFRESH_MS = 1500;
+      // En dessous de cet écart, on considère l'horloge du PC comme juste.
+      const SKEW_MIN_MS = 2000;
       const POLL_VISIBLE_MS = 7000;
       const POLL_HIDDEN_MS = 20000;
       const BALANCE_REFRESH_MS = 60 * 1000;
 
       const { readLocalValue, writeLocalValue } = runtime.core;
       const logic = runtime.myBidsLogic;
+      const autoLogic = runtime.autoBidLogic;
+      const kit = runtime.uiKit;
       const alerts = logic.createAlertTracker();
 
       const state = {
@@ -27,7 +35,15 @@
         soundOn: readLocalValue(SOUND_KEY) !== false,
         pending: new Set(),
         rowErrors: new Map(),
-        minHints: new Map()
+        minHints: new Map(),
+        // Auto-enchère : réglages par enchère (persistés), brouillons de saisie, panneaux ouverts.
+        autoBids: autoLogic.normalizeStore(readLocalValue(AUTO_KEY), Date.now()),
+        autoDrafts: new Map(),
+        autoOpen: new Set(),
+        autoNotes: new Map(),
+        lastAttempt: new Map(),
+        // Écart horloge serveur - horloge locale (ms), estimé via l'en-tête Date de l'API.
+        skewMs: 0
       };
 
       let running = false;
@@ -37,7 +53,168 @@
       let pollTimer = null;
       let tickTimer = null;
       let balanceAt = 0;
+      let lastRefreshAt = 0;
       let audioContext = null;
+
+      // Styles propres à la page (badge, auto-enchère). Injectés par le JS : toujours synchrones avec le balisage.
+      const AUTO_BID_CSS = `
+.wm-bids-row {
+  grid-template-columns: 46px minmax(0, 1fr) auto 76px 104px;
+}
+
+.wm-bids-rarity {
+  opacity: 1;
+}
+
+.wm-bids-price {
+  font-weight: 800;
+}
+
+.wm-bids-auto {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 2px;
+}
+
+.wm-bids-auto-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wm-bids-auto-btn:hover {
+  border-color: rgba(52, 211, 153, 0.5);
+}
+
+.wm-bids-auto-btn.is-primary {
+  border-color: rgba(52, 211, 153, 0.45);
+  background: rgba(52, 211, 153, 0.14);
+  color: #34d399;
+}
+
+.wm-bids-auto-state {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.wm-bids-auto-state.is-armed {
+  color: #34d399;
+  font-weight: 700;
+  opacity: 1;
+}
+
+.wm-bids-auto-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  border-radius: 10px;
+  background: rgba(52, 211, 153, 0.06);
+}
+
+.wm-bids-auto-field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.wm-bids-auto-field input {
+  box-sizing: border-box;
+  width: 110px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.wm-bids-auto-field input:focus {
+  border-color: #34d399;
+  outline: 2px solid rgba(52, 211, 153, 0.3);
+  outline-offset: 1px;
+}
+
+.wm-bids-auto-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.wm-bids-auto-error {
+  flex: 1 1 100%;
+  color: #f87171;
+  font-size: 0.75rem;
+}
+
+.wm-bids-auto-error[hidden],
+.wm-bids-auto-banner[hidden] {
+  display: none;
+}
+
+.wm-bids-auto-help {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  opacity: 0.65;
+}
+
+.wm-bids-auto-note {
+  grid-column: 1 / -1;
+  color: #34d399;
+  font-size: 0.75rem;
+}
+
+.wm-bids-auto-banner {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding: 10px 14px;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  border-radius: 10px;
+  background: rgba(52, 211, 153, 0.1);
+  color: #a7f3d0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.wm-bids-auto-off {
+  padding: 4px 10px;
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  border-radius: 8px;
+  background: transparent;
+  color: #fca5a5;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .wm-bids-row {
+    grid-template-columns: 42px minmax(0, 1fr) 96px;
+  }
+}
+`;
 
       function el(tag, className, text) {
         const node = document.createElement(tag);
@@ -45,6 +222,8 @@
         if (text != null) node.textContent = text;
         return node;
       }
+
+      const serverNow = () => Date.now() + state.skewMs;
 
       const numberFormat = new Intl.NumberFormat('fr-FR');
       const formatAmount = (value) => `${numberFormat.format(value)} W`;
@@ -103,6 +282,8 @@
       }
 
       function buildPage() {
+        kit.ensureStyles();
+        kit.injectStyles('wm-auto-bid-styles', AUTO_BID_CSS);
         const page = document.createElement('section');
         page.id = PAGE_ID;
         page.className = 'wm-bids-page';
@@ -157,7 +338,7 @@
 
       function checkAlerts() {
         if (state.soundOn && !audioRunning()) return;
-        const fresh = alerts.collect(state.bids, Date.now());
+        const fresh = alerts.collect(state.bids, serverNow());
         if (fresh.length && state.soundOn) playUrgentBeep();
       }
 
@@ -172,6 +353,13 @@
           throw new Error('Session expirée, reconnecte-toi à WikiMasters.');
         }
         if (!response.ok) throw new Error(`Actualisation impossible (HTTP ${response.status}).`);
+
+        // L'en-tête Date a une précision d'1 s : on ne corrige que si l'horloge du PC est nettement décalée.
+        const serverTime = Date.parse(response.headers.get('date') || '');
+        if (Number.isFinite(serverTime)) {
+          const skew = serverTime - Date.now();
+          state.skewMs = Math.abs(skew) >= SKEW_MIN_MS ? skew : 0;
+        }
 
         return logic.extractBids(await response.json());
       }
@@ -201,6 +389,7 @@
           return;
         }
         loading = true;
+        lastRefreshAt = Date.now();
         const generation = bidGeneration;
 
         try {
@@ -212,10 +401,12 @@
             if (!ids.has(id)) state.minHints.delete(id);
           }
           state.userId = logic.parseUserIdFromCookies(document.cookie);
+          forgetFinishedAutoBids(ids);
           state.error = null;
           state.loaded = true;
           state.updatedAt = Date.now();
           checkAlerts();
+          autoStep();
 
           if (Date.now() - balanceAt > BALANCE_REFRESH_MS) refreshBalance();
         } catch (error) {
@@ -234,11 +425,13 @@
         }
       }
 
-      async function placeBid(auctionId) {
+      // Renvoie { ok } : l'auto-enchère s'en sert pour compter les mises et les échecs.
+      async function placeBid(auctionId, options = {}) {
         const bid = state.bids.find((item) => item.id === auctionId);
-        if (!bid || state.pending.has(auctionId)) return;
+        if (!bid || state.pending.has(auctionId)) return { ok: false, skipped: true };
 
-        const amount = bidAmountFor(bid);
+        const amount = Number.isInteger(options.amount) ? options.amount : bidAmountFor(bid);
+        let ok = false;
         state.pending.add(auctionId);
         state.rowErrors.delete(auctionId);
         renderList();
@@ -259,7 +452,7 @@
           if (!response.ok) {
             state.rowErrors.set(
               auctionId,
-              String(json?.error || json?.message || `Mise refusée (HTTP ${response.status}).`)
+              `${options.auto ? 'Auto : ' : ''}${String(json?.error || json?.message || `Mise refusée (HTTP ${response.status}).`)}`
             );
 
             const minimum = logic.parseMinimumFromError(state.rowErrors.get(auctionId));
@@ -267,6 +460,7 @@
               state.minHints.set(auctionId, { price: logic.currentPrice(bid), amount: minimum });
             }
           } else {
+            ok = true;
             bidGeneration += 1;
             state.bids = state.bids.map((item) =>
               item.id === auctionId
@@ -284,6 +478,115 @@
           renderAll();
           if (running) refresh();
         }
+
+        return { ok };
+      }
+
+      // ---- Auto-enchère ---------------------------------------------------------------
+
+      function saveAutoBids() {
+        writeLocalValue(AUTO_KEY, state.autoBids);
+      }
+
+      function setAutoConfig(auctionId, config) {
+        state.autoBids = { ...state.autoBids, [auctionId]: { ...config, updatedAt: Date.now() } };
+        saveAutoBids();
+      }
+
+      function removeAutoConfig(auctionId) {
+        const { [auctionId]: _removed, ...rest } = state.autoBids;
+        state.autoBids = rest;
+        state.autoDrafts.delete(auctionId);
+        state.autoOpen.delete(auctionId);
+        state.autoNotes.delete(auctionId);
+        state.lastAttempt.delete(auctionId);
+        saveAutoBids();
+      }
+
+      function disarmAuto(auctionId, reason) {
+        const config = state.autoBids[auctionId];
+        if (!config) return;
+        setAutoConfig(auctionId, autoLogic.disarm(config, reason));
+        renderList();
+        renderHeader();
+      }
+
+      function disarmAll() {
+        for (const [id, config] of Object.entries(state.autoBids)) {
+          if (config.armed) state.autoBids[id] = autoLogic.disarm(config, 'manual');
+        }
+        saveAutoBids();
+        renderAll();
+      }
+
+      // Une enchère qui n'est plus dans la liste est terminée : son réglage n'a plus lieu d'être.
+      function forgetFinishedAutoBids(presentIds) {
+        let changed = false;
+        for (const id of Object.keys(state.autoBids)) {
+          if (!presentIds.has(id)) {
+            const { [id]: _removed, ...rest } = state.autoBids;
+            state.autoBids = rest;
+            state.autoNotes.delete(id);
+            state.autoOpen.delete(id);
+            state.autoDrafts.delete(id);
+            changed = true;
+          }
+        }
+        if (changed) saveAutoBids();
+      }
+
+      async function runAutoBid(bid, amount) {
+        state.lastAttempt.set(bid.id, Date.now());
+        const remaining = Math.max(0, Math.round(logic.remainingMs(bid, serverNow()) / 1000));
+        const result = await placeBid(bid.id, { amount, auto: true });
+        if (result.skipped) return;
+
+        const config = state.autoBids[bid.id];
+        if (!config) return;
+
+        if (result.ok) {
+          setAutoConfig(bid.id, autoLogic.afterBidSuccess(config));
+          state.autoNotes.set(bid.id, `Auto : mise de ${formatAmount(amount)} placée à ${remaining} s de la fin.`);
+        } else {
+          setAutoConfig(bid.id, autoLogic.afterBidFailure(config));
+        }
+        renderAll();
+      }
+
+      // Appelée chaque seconde et après chaque actualisation : décide, pour chaque enchère armée,
+      // s'il faut miser, attendre ou s'arrêter, et resserre l'actualisation en fin d'enchère.
+      function autoStep() {
+        if (!running || !state.loaded) return;
+
+        const now = serverNow();
+        let needFast = false;
+
+        for (const bid of state.bids) {
+          const config = state.autoBids[bid.id];
+          if (!config?.armed) continue;
+
+          const remaining = logic.remainingMs(bid, now);
+          if (remaining > 0 && remaining <= FAST_WINDOW_MS) needFast = true;
+          if (state.pending.has(bid.id)) continue;
+
+          const decision = autoLogic.decide({
+            config,
+            remainingMs: remaining,
+            leading: logic.bidStatus(bid, state.userId) === 'leading',
+            nextAmount: bidAmountFor(bid),
+            balance: state.balance,
+            now: Date.now(),
+            lastAttemptAt: state.lastAttempt.get(bid.id) || 0
+          });
+
+          if (decision.action === 'stop') {
+            disarmAuto(bid.id, decision.reason);
+          } else if (decision.action === 'bid') {
+            runAutoBid(bid, decision.amount);
+          }
+        }
+
+        if (needFast && !loading && Date.now() - lastRefreshAt >= FAST_REFRESH_MS) refresh();
       }
 
       function pageContent() {
@@ -316,6 +619,10 @@
 
         const controls = el('div', 'wm-bids-controls');
 
+        const banner = el('div', 'wm-bids-auto-banner');
+        banner.dataset.role = 'auto-banner';
+        banner.hidden = true;
+
         const balance = el('span', 'wm-bids-balance', null);
         balance.dataset.role = 'balance';
 
@@ -345,7 +652,7 @@
         });
 
         controls.append(balance, sound);
-        header.append(titleWrap, controls);
+        header.append(titleWrap, controls, banner);
         return header;
       }
 
@@ -371,6 +678,27 @@
         }
 
         updateSoundButton();
+        renderAutoBanner();
+      }
+
+      function renderAutoBanner() {
+        const banner = document.querySelector(`#${PAGE_ID} [data-role="auto-banner"]`);
+        if (!banner) return;
+
+        const armedCount = Object.values(state.autoBids).filter((config) => config.armed).length;
+        banner.hidden = armedCount === 0;
+        banner.replaceChildren();
+        if (!armedCount) return;
+
+        const text = el(
+          'span',
+          null,
+          `⚡ Auto-enchère armée sur ${armedCount} enchère${armedCount > 1 ? 's' : ''}. Garde cet onglet ouvert et visible : si la page est fermée ou mise longtemps en arrière-plan, aucune mise ne partira.`
+        );
+        const off = el('button', 'wm-bids-auto-off', 'Tout désarmer');
+        off.type = 'button';
+        off.addEventListener('click', disarmAll);
+        banner.append(text, off);
       }
 
       function bidAmountFor(bid) {
@@ -387,8 +715,137 @@
           logic.bidStatus(bid, state.userId) === 'leading';
       }
 
+      function buildAutoBlock(bid, remaining) {
+        const block = el('div', 'wm-bids-auto');
+        block.dataset.role = 'auto';
+        if (remaining <= 0) return block;
+
+        const config = state.autoBids[bid.id];
+        const open = state.autoOpen.has(bid.id);
+        const minimum = bidAmountFor(bid);
+
+        const openPanel = () => {
+          if (!state.autoDrafts.has(bid.id)) {
+            state.autoDrafts.set(bid.id, {
+              max: config ? String(config.max) : '',
+              maxBids: String(config ? config.maxBids : autoLogic.DEFAULT_MAX_BIDS)
+            });
+          }
+          state.autoOpen.add(bid.id);
+          renderList();
+        };
+
+        if (config?.armed) {
+          const summary = el(
+            'span',
+            'wm-bids-auto-state is-armed',
+            `⚡ Auto armée : max ${formatAmount(config.max)} • ${config.placed}/${config.maxBids} mise${config.maxBids > 1 ? 's' : ''} • à ${autoLogic.TRIGGER_MS / 1000} s de la fin`
+          );
+          const off = el('button', 'wm-bids-auto-btn', 'Désarmer');
+          off.type = 'button';
+          off.dataset.role = 'auto-disarm';
+          off.addEventListener('click', () => disarmAuto(bid.id, 'manual'));
+          block.append(summary, off);
+          return block;
+        }
+
+        if (!open) {
+          const toggle = el('button', 'wm-bids-auto-btn', config?.stopReason && config.stopReason !== 'manual' ? '⚡ Reconfigurer l’auto-enchère' : '⚡ Auto-enchère');
+          toggle.type = 'button';
+          toggle.dataset.role = 'auto-open';
+          toggle.addEventListener('click', openPanel);
+          block.append(toggle);
+
+          const why = config?.stopReason ? autoLogic.STOP_MESSAGES[config.stopReason] : null;
+          if (why) block.append(el('span', 'wm-bids-auto-state', `Auto arrêtée : ${why}`));
+          return block;
+        }
+
+        const draft = state.autoDrafts.get(bid.id) || { max: '', maxBids: String(autoLogic.DEFAULT_MAX_BIDS) };
+        const panel = el('form', 'wm-bids-auto-panel');
+        panel.dataset.role = 'auto-panel';
+        // Nos messages d'erreur remplacent les bulles natives du navigateur.
+        panel.noValidate = true;
+
+        const field = (labelText, key, extra) => {
+          const label = el('label', 'wm-bids-auto-field');
+          label.append(el('span', null, labelText));
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.step = '1';
+          input.inputMode = 'numeric';
+          input.autocomplete = 'off';
+          input.dataset.role = `auto-${key}`;
+          input.value = draft[key] ?? '';
+          Object.assign(input, extra);
+          input.addEventListener('input', () => {
+            state.autoDrafts.set(bid.id, { ...(state.autoDrafts.get(bid.id) || draft), [key]: input.value });
+          });
+          label.append(input);
+          return label;
+        };
+
+        const maxField = field('Prix max (W)', 'max', { min: String(minimum), placeholder: `≥ ${minimum}` });
+        const bidsField = field(`Mises max (1-${autoLogic.MAX_BIDS_CAP})`, 'maxBids', { min: '1', max: String(autoLogic.MAX_BIDS_CAP) });
+
+        const error = el('div', 'wm-bids-auto-error');
+        error.dataset.role = 'auto-error';
+        error.hidden = true;
+
+        const arm = el('button', 'wm-bids-auto-btn is-primary', 'Armer');
+        arm.type = 'submit';
+        arm.dataset.role = 'auto-arm';
+
+        const cancel = el('button', 'wm-bids-auto-btn', 'Annuler');
+        cancel.type = 'button';
+        cancel.addEventListener('click', () => {
+          document.activeElement?.blur?.();
+          state.autoOpen.delete(bid.id);
+          state.autoDrafts.delete(bid.id);
+          renderList();
+        });
+
+        const help = el(
+          'p',
+          'wm-bids-auto-help',
+          `À ${autoLogic.TRIGGER_MS / 1000} s de la fin, si tu n’es pas en tête, mise le minimum requis (${formatAmount(minimum)} maintenant), puis recommence après chaque surenchère, jusqu’au prix max ou au nombre de mises choisi. Onglet à garder ouvert et visible.`
+        );
+
+        panel.addEventListener('submit', (event) => {
+          event.preventDefault();
+          const current = state.bids.find((item) => item.id === bid.id);
+          const values = state.autoDrafts.get(bid.id) || draft;
+          const result = autoLogic.validateConfig(values, current ? bidAmountFor(current) : minimum);
+
+          if (!result.ok) {
+            error.textContent = {
+              'invalid-max': 'Prix max : entre un nombre entier.',
+              'max-too-low': `Prix max trop bas : la prochaine mise minimale est de ${formatAmount(current ? bidAmountFor(current) : minimum)}.`,
+              'invalid-bids': `Mises max : entre un entier de 1 à ${autoLogic.MAX_BIDS_CAP}.`
+            }[result.reason] || 'Réglage invalide.';
+            error.hidden = false;
+            return;
+          }
+
+          // On quitte le champ : sinon la ligne en cours de saisie ne serait pas reconstruite.
+          document.activeElement?.blur?.();
+          setAutoConfig(bid.id, result.config);
+          state.autoOpen.delete(bid.id);
+          state.autoDrafts.delete(bid.id);
+          state.autoNotes.delete(bid.id);
+          renderAll();
+          autoStep();
+        });
+
+        const buttons = el('div', 'wm-bids-auto-buttons');
+        buttons.append(arm, cancel);
+        panel.append(maxField, bidsField, buttons, error, help);
+        block.append(panel);
+        return block;
+      }
+
       function buildRow(bid) {
-        const now = Date.now();
+        const now = serverNow();
         const remaining = logic.remainingMs(bid, now);
         const status = logic.bidStatus(bid, state.userId);
         const nextAmount = bidAmountFor(bid);
@@ -400,7 +857,11 @@
         row.classList.toggle('is-urgent', remaining > 0 && remaining <= 60000);
 
         const rarity = String(bid.snapshot_rarity || bid.card?.rarity || '');
-        row.append(el('span', 'wm-bids-rarity', rarity));
+        const rarityCell = el('span', 'wm-bids-rarity');
+        const rarityBadge = kit.createRarityBadge(rarity);
+        if (rarityBadge) rarityCell.append(rarityBadge);
+        else rarityCell.textContent = rarity;
+        row.append(rarityCell);
 
         const title = el('a', 'wm-bids-card', bid.card?.wikipedia_title || 'Carte');
         title.href = `/marketplace/${encodeURIComponent(bid.id)}`;
@@ -411,7 +872,8 @@
         if (status === 'leading') info.append(el('span', 'wm-bids-badge is-leading', 'En tête'));
         else if (status === 'outbid') info.append(el('span', 'wm-bids-badge is-outbid', 'Dépassé'));
 
-        const price = el('span', 'wm-bids-price', formatAmount(logic.currentPrice(bid)));
+        const price = el('span', 'wm-bids-price');
+        price.append(kit.createPrice(formatAmount(logic.currentPrice(bid))));
 
         const countdown = el('span', 'wm-bids-countdown', logic.formatRemaining(remaining));
         countdown.dataset.role = 'countdown';
@@ -426,6 +888,10 @@
         button.addEventListener('click', () => placeBid(bid.id));
 
         row.append(info, price, countdown, button);
+        row.append(buildAutoBlock(bid, remaining));
+
+        const note = state.autoNotes.get(bid.id);
+        if (note) row.append(el('div', 'wm-bids-auto-note', note));
 
         const error = state.rowErrors.get(bid.id);
         if (error) {
@@ -444,8 +910,26 @@
         let list = content.querySelector('[data-role="list"]');
         if (!list) return;
 
-        const sorted = logic.sortBids(state.bids, Date.now());
-        list.replaceChildren(...sorted.map(buildRow));
+        const sorted = logic.sortBids(state.bids, serverNow());
+
+        // Une ligne dont un champ a le focus n'est pas reconstruite : sinon l'actualisation
+        // (toutes les 1,5 s en fin d'enchère) ferait perdre la saisie.
+        const kept = new Map();
+        for (const existing of list.children) {
+          const active = document.activeElement;
+          if (active?.tagName === 'INPUT' && existing.contains(active)) {
+            kept.set(existing.dataset.auctionId, existing);
+          }
+        }
+        const desired = sorted.map((bid) => kept.get(bid.id) || buildRow(bid));
+
+        // Pas de replaceChildren : retirer puis remettre une ligne fait perdre le focus de son champ.
+        for (const child of [...list.children]) {
+          if (!desired.includes(child)) child.remove();
+        }
+        desired.forEach((node, index) => {
+          if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+        });
 
         const empty = content.querySelector('[data-role="empty"]');
         if (empty) empty.hidden = !(state.loaded && !state.error && !sorted.length);
@@ -471,7 +955,7 @@
       }
 
       function tick() {
-        const now = Date.now();
+        const now = serverNow();
 
         for (const row of document.querySelectorAll(`#${PAGE_ID} .wm-bids-row`)) {
           const bid = state.bids.find((item) => item.id === row.dataset.auctionId);
@@ -490,6 +974,7 @@
 
         checkAlerts();
         updateSoundButton();
+        autoStep();
       }
 
       function schedulePoll() {
