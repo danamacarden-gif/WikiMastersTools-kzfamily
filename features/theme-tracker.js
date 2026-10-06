@@ -1894,12 +1894,21 @@
 
         const filters = document.createElement('div');
         filters.className = 'wm-family-filters';
-        filters.innerHTML = `
-          <button type="button" data-filter="all">Toutes <strong>${stats.total.toLocaleString('fr-FR')}</strong></button>
-          <button type="button" data-filter="owned">Possédées <strong>${stats.owned.toLocaleString('fr-FR')}</strong></button>
-          <button type="button" data-filter="missing">Manquantes <strong>${stats.missing.toLocaleString('fr-FR')}</strong></button>
-          ${stats.unchecked ? `<button type="button" data-filter="unchecked">À vérifier <strong>${stats.unchecked.toLocaleString('fr-FR')}</strong></button>` : ''}
-        `;
+        const filterDefs = [
+          ['all', 'Toutes', stats.total],
+          ['owned', 'Possédées', stats.owned],
+          ['missing', 'Manquantes', stats.missing],
+        ];
+        if (stats.unchecked) filterDefs.push(['unchecked', 'À vérifier', stats.unchecked]);
+        filters.append(...filterDefs.map(([key, label, count]) => {
+          const filterButton = document.createElement('button');
+          filterButton.type = 'button';
+          filterButton.dataset.filter = key;
+          const countEl = document.createElement('strong');
+          countEl.textContent = Number(count).toLocaleString('fr-FR');
+          filterButton.append(`${label} `, countEl);
+          return filterButton;
+        }));
 
         filters.querySelectorAll('[data-filter]').forEach((button) => {
           button.classList.toggle('is-active', button.dataset.filter === currentFilter);
@@ -1924,9 +1933,13 @@
         const empty = document.createElement('div');
         empty.className = 'wm-family-detail-empty';
         empty.hidden = family.cards.length > 0;
-        empty.innerHTML = editing
-          ? '<strong>Cette famille est vide.</strong><span>Utilise « Ajouter des cartes » pour commencer.</span>'
-          : '<strong>Cette famille est vide.</strong><span>Passe en mode édition pour ajouter des cartes.</span>';
+        const emptyTitle = document.createElement('strong');
+        emptyTitle.textContent = 'Cette famille est vide.';
+        const emptyHint = document.createElement('span');
+        emptyHint.textContent = editing
+          ? 'Utilise « Ajouter des cartes » pour commencer.'
+          : 'Passe en mode édition pour ajouter des cartes.';
+        empty.append(emptyTitle, emptyHint);
 
         const more = document.createElement('button');
         more.type = 'button';
