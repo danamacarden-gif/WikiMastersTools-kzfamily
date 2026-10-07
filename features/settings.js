@@ -21,6 +21,7 @@
         rankingSales: true,
         themeTracker: true,
         myBids: true,
+        mySales: true,
         bulkDiscard: true,
         compactMode: true,
         packRecap: true,
@@ -61,7 +62,8 @@
           title: 'Familles',
           description: 'Collectionne et partage des groupes de cartes personnalisés.',
           items: [
-            ['themeTracker', 'Afficher la page Familles', 'Ajoute Familles au menu latéral. Désactive cette option pour masquer entièrement la page et son entrée dans le menu.']
+            ['themeTracker', 'Afficher la page Familles', 'Ajoute Familles au menu latéral. Désactive cette option pour masquer entièrement la page et son entrée dans le menu.'],
+            ['mySales', 'Afficher la page Mes ventes', 'Ajoute Mes ventes au menu latéral : tableau de bord de tes ventes en cours avec prix actuel, temps restant et historique des mises.']
           ]
         },
         {

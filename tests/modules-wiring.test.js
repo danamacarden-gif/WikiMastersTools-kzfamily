@@ -114,3 +114,18 @@ test('bulkDiscardLogic est chargé, exigé et créé avant bulkDiscard', () => {
   assert.ok(logic >= 0 && logic < page, 'bulkDiscardLogic doit être créé avant bulkDiscard');
   assert.ok(read('features/app.js').includes('runtime.bulkDiscard.render()'), 'app.js doit rendre la page de défausse');
 });
+
+test('Mes ventes : câblé dans bootstrap, manifest, content (avant bulkDiscard) et app', () => {
+  const content = read('content.js');
+  const at = (n) => content.indexOf(`runtime.${n} = featureRegistry.${n}.create`);
+  assert.ok(at('mySalesLogic') >= 0 && at('mySalesLogic') < at('mySales'));
+  assert.ok(at('mySales') > at('uiKit') && at('mySales') > at('myBidsLogic') && at('mySales') < at('bulkDiscard'));
+  assert.match(content, /'mySalesLogic',\s*'mySales'/);
+  const manifest = read('manifest.json');
+  const paths = bootstrapPaths();
+  for (const file of ['features/my-sales-logic.js', 'features/my-sales.js']) {
+    assert.ok(paths.includes(file), `${file} absent de bootstrap.js`);
+    assert.ok(manifest.includes(`"${file}"`), `${file} absent du manifest`);
+  }
+  assert.ok(read('features/app.js').indexOf('runtime.mySales.render()') < read('features/app.js').indexOf('runtime.bulkDiscard.render()'));
+});
