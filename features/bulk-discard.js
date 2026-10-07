@@ -219,6 +219,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           state.plan = logic.buildPlan(rows, context, state.params, priceOf);
           state.selected = new Set(logic.defaultSelection(state.plan.items, state.params.limit));
           state.ack = false;
+          state.baseLimit = null;
           state.view = 'preview';
         } catch (error) {
           state.view = 'error';
@@ -435,14 +436,24 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           master.dataset.role = 'include-unpriced';
           master.addEventListener('change', () => {
             if (master.checked) {
-              for (const id of logic.unpricedToAdd(plan.items, state.selected, state.params.limit)) state.selected.add(id);
+              // « Tout cocher » est un choix explicite : la case coche TOUS les exemplaires sans prix
+              // et relève le lot en conséquence (affiché dans le compteur, confirmation renforcée).
+              for (const item of unpricedItems) state.selected.add(item.userCardId);
+              if (state.selected.size > state.params.limit) {
+                if (state.baseLimit == null) state.baseLimit = state.params.limit;
+                state.params.limit = state.selected.size;
+              }
             } else {
               for (const item of unpricedItems) state.selected.delete(item.userCardId);
+              if (state.baseLimit != null && state.selected.size <= state.baseLimit) {
+                state.params.limit = state.baseLimit;
+                state.baseLimit = null;
+              }
             }
             syncRowBoxes();
             refreshFooter();
           });
-          masterLabel.append(master, el('span', '', `Défausser aussi les ${plural(unpricedItems.length, 'exemplaire sans prix connu', 'exemplaires sans prix connu')} (valeur inconnue : à tes risques, dans la limite du lot)`));
+          masterLabel.append(master, el('span', '', `Défausser aussi les ${plural(unpricedItems.length, 'exemplaire sans prix connu', 'exemplaires sans prix connu')} (valeur inconnue : à tes risques ; le lot est relevé si besoin)`));
           wrap.append(masterLabel);
         }
 
@@ -513,7 +524,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         const unpricedSelected = state.plan.items.filter((item) => item.unpriced && state.selected.has(item.userCardId)).length;
         const info = document.querySelector(`#${PAGE_ID} [data-role="selection-info"]`);
         if (info) {
-          info.textContent = `Sélection : ${fmt(n)} / ${fmt(limit)} (lot maximum)${unpricedSelected ? `, dont ${fmt(unpricedSelected)} sans prix connu` : ''}.${n > limit ? ' Trop de cartes : décoche-en ou augmente le lot dans les critères.' : ''}`;
+          info.textContent = `Sélection : ${fmt(n)} / ${fmt(limit)} (lot maximum${state.baseLimit != null ? `, relevé depuis ${fmt(state.baseLimit)}` : ''})${unpricedSelected ? `, dont ${fmt(unpricedSelected)} sans prix connu` : ''}.${n > limit ? ' Trop de cartes : décoche-en ou augmente le lot dans les critères.' : ''}`;
           info.dataset.kind = n > limit ? 'error' : '';
         }
 
@@ -539,9 +550,23 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         if (unpricedSelected) {
           wrap.append(el('div', 'wm-discard-warning', `Dont ${plural(unpricedSelected, 'carte sans prix connu', 'cartes sans prix connu')} : leur valeur est inconnue, tu peux défausser une carte qui vaut cher.`));
         }
+        // Gros lot : il faut retaper le nombre exact pour confirmer.
+        const BIG = logic.MAX_LIMIT;
+        let typed = null;
+        if (n > BIG) {
+          wrap.append(el('div', 'wm-discard-warning', `Gros lot (plus de ${fmt(BIG)} cartes) : tape ${fmt(n)} pour confirmer.`));
+          typed = document.createElement('input');
+          typed.type = 'text';
+          typed.inputMode = 'numeric';
+          typed.className = 'wm-discard-input';
+          typed.dataset.role = 'confirm-count';
+          wrap.append(typed);
+        }
         const actions = el('div', 'wm-discard-actions');
+        const runButton = button(`Oui, défausser ${plural(n, 'carte', 'cartes')}`, 'is-danger', execute, typed != null, 'confirm-run');
+        if (typed) typed.addEventListener('input', () => { runButton.disabled = typed.value.replace(/\D/g, '') !== String(n); });
         actions.append(
-          button(`Oui, défausser ${plural(n, 'carte', 'cartes')}`, 'is-danger', execute, false, 'confirm-run'),
+          runButton,
           button('Annuler', '', () => { state.view = 'preview'; render(); }, false, 'cancel-confirm')
         );
         wrap.append(actions);
