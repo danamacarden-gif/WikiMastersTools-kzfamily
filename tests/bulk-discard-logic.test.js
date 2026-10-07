@@ -36,13 +36,34 @@ test('buildPlan : ne retient que la rareté choisie sous le prix max (inclus)', 
   assert.equal(plan.counts.aboveMax, 1);
 });
 
-test('une carte sans prix connu n’est jamais défaussée', () => {
+test('une carte sans prix est listée (price null, unpriced) mais jamais sélectionnée d’office', () => {
   const plan = logic.buildPlan([row(1), row(2)], ctx(), params(), priceMap({ [H(1)]: 1 }));
-  assert.deepEqual(ids(plan), [H(1)]);
+  assert.deepEqual(plan.items.map((x) => [x.cardId, x.price, x.unpriced]), [[H(1), 1, false], [H(2), null, true]]);
   assert.equal(plan.counts.unpriced, 1);
+  assert.deepEqual(logic.defaultSelection(plan.items, 50), [plan.items[0].userCardId]);
   for (const bad of [NaN, undefined, 'x', -1, Infinity]) {
-    assert.equal(logic.buildPlan([row(9)], ctx(), params(), () => bad).eligible.length, 0, String(bad));
+    const p = logic.buildPlan([row(9)], ctx(), params(), () => bad);
+    assert.equal(p.items.length, 1, String(bad));
+    assert.equal(p.items[0].unpriced, true, String(bad));
+    assert.deepEqual(logic.defaultSelection(p.items, 50), [], String(bad));
   }
+});
+
+test('les cartes sans prix suivent celles avec prix dans la liste', () => {
+  const rows = [row(1, { card: { id: H(1), wikipedia_title: 'Zèbre', rarity: 'C' } }), row(2, { card: { id: H(2), wikipedia_title: 'Abeille', rarity: 'C' } })];
+  const plan = logic.buildPlan(rows, ctx(), params(), priceMap({ [H(1)]: 1 }));
+  assert.deepEqual(plan.items.map((x) => x.title), ['Zèbre', 'Abeille']);
+});
+
+test('unpricedToAdd : coche les sans-prix dans la limite du lot, sans doublon', () => {
+  const rows = [row(1), row(2), row(3), row(4)];
+  const plan = logic.buildPlan(rows, ctx(), params(), priceMap({ [H(1)]: 1 }));
+  const selected = new Set(logic.defaultSelection(plan.items, 3));
+  assert.equal(selected.size, 1);
+  assert.equal(logic.unpricedToAdd(plan.items, selected, 3).length, 2, 'reste 2 places sur 3');
+  assert.equal(logic.unpricedToAdd(plan.items, selected, 1).length, 0, 'lot plein');
+  assert.equal(logic.unpricedToAdd(plan.items, selected, 10).length, 3);
+  assert.deepEqual(logic.unpricedToAdd(null, null, 5), []);
 });
 
 test('protections : favori, étiquette, shiny, famille, échange en cours', () => {
@@ -99,12 +120,21 @@ test('keepOne : garde l’exemplaire le plus ancien et ne défausse que les doub
   assert.equal(all.eligible.length, 4);
 });
 
-test('plafond de lot : items limités, le reste est compté', () => {
+test('liste complète ; la sélection initiale est plafonnée par le lot', () => {
   const rows = Array.from({ length: 7 }, (_, i) => row(i + 1));
   const plan = logic.buildPlan(rows, ctx(), params({ limit: 3 }), () => 1);
   assert.equal(plan.eligible.length, 7);
-  assert.equal(plan.items.length, 3);
-  assert.equal(plan.overLimit, 4);
+  assert.equal(plan.items.length, 7);
+  assert.equal(plan.overList, 0);
+  assert.equal(logic.defaultSelection(plan.items, 3).length, 3);
+  assert.equal(logic.defaultSelection(plan.items, 0).length, 0);
+});
+
+test('liste tronquée au-delà de LIST_CAP, le reste est compté', () => {
+  const rows = Array.from({ length: logic.LIST_CAP + 5 }, (_, i) => row(i + 1));
+  const plan = logic.buildPlan(rows, ctx(), params(), () => 1);
+  assert.equal(plan.items.length, logic.LIST_CAP);
+  assert.equal(plan.overList, 5);
 });
 
 test('lignes invalides ou en double ignorées, entrées vides tolérées', () => {
@@ -136,4 +166,51 @@ test('discardUrl : uuid seulement ; familyCardIds : toutes les familles', () => 
   const set = logic.familyCardIds([{ cards: [{ id: 'a' }, { id: 'b' }] }, { cards: [{ id: 'b' }, {}] }, null, { cards: null }]);
   assert.deepEqual([...set].sort(), ['a', 'b']);
   assert.equal(logic.familyCardIds(null).size, 0);
+});
+
+// ---- Mémoire des prix ------------------------------------------------------------
+test('priceStore : un prix connu reste valable 7 jours, « pas de prix » 24 h', () => {
+  const now = 1_700_000_000_000; const DAY = 24 * 3600 * 1000;
+  const store = {};
+  logic.rememberPrice(store, H(1), 2.5, now - 6 * DAY);
+  logic.rememberPrice(store, H(2), 2.5, now - 8 * DAY);
+  logic.rememberPrice(store, H(3), null, now - 2 * 3600 * 1000);
+  logic.rememberPrice(store, H(4), null, now - 2 * DAY);
+  assert.deepEqual(logic.lookupPrice(store, H(1), now), { hit: true, price: 2.5 });
+  assert.equal(logic.lookupPrice(store, H(2), now).hit, false);
+  assert.deepEqual(logic.lookupPrice(store, H(3), now), { hit: true, price: null });
+  assert.equal(logic.lookupPrice(store, H(4), now).hit, false);
+  assert.equal(logic.lookupPrice(store, H(5), now).hit, false);
+  assert.equal(logic.lookupPrice(null, H(1), now).hit, false);
+});
+
+test('priceStore : un prix de 0 est un vrai prix ; valeurs invalides jamais mémorisées', () => {
+  const store = {}; const now = Date.now();
+  logic.rememberPrice(store, H(1), 0, now);
+  assert.deepEqual(logic.lookupPrice(store, H(1), now), { hit: true, price: 0 });
+  for (const bad of [NaN, undefined, 'x', -1, Infinity]) logic.rememberPrice(store, H(2), bad, now);
+  logic.rememberPrice(store, 'pas-un-uuid', 1, now);
+  assert.deepEqual(Object.keys(store), [H(1)]);
+});
+
+test('priceStore : un horodatage futur est périmé ; normalizePriceStore écarte le bruit', () => {
+  const now = 1_700_000_000_000;
+  assert.equal(logic.lookupPrice({ [H(1)]: [1, now + 5000] }, H(1), now).hit, false);
+  const clean = logic.normalizePriceStore({
+    [H(1)]: [1, now], [H(2)]: [null, now], [H(3)]: ['x', now], [H(4)]: [1], [H(5)]: [1, 'a'],
+    'pas-un-uuid': [1, now], [H(6)]: 'oops', [H(7)]: [-3, now]
+  });
+  assert.deepEqual(Object.keys(clean).sort(), [H(1), H(2)].sort());
+  for (const bad of [null, undefined, 'x', [], 5]) assert.deepEqual(logic.normalizePriceStore(bad), {});
+});
+
+test('priceStore : prune retire les périmés puis les plus anciens au-delà du plafond', () => {
+  const now = 1_700_000_000_000; const DAY = 24 * 3600 * 1000;
+  const store = {};
+  logic.rememberPrice(store, H(1), 1, now - 10 * DAY);   // périmé
+  logic.rememberPrice(store, H(2), 1, now - 3 * DAY);
+  logic.rememberPrice(store, H(3), 1, now - 2 * DAY);
+  logic.rememberPrice(store, H(4), 1, now - 1 * DAY);
+  logic.prunePriceStore(store, now, 2);
+  assert.deepEqual(Object.keys(store).sort(), [H(3), H(4)].sort());
 });
