@@ -150,6 +150,14 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
       // une salve ne relit rien de ce qui est déjà frais. `force` (Actualiser) relit tout.
       const readCache = new Map(); // rareté -> { rows, pending, at }
 
+      // Retire du cache de lecture les exemplaires qui ne sont plus dans la collection (défaussés, ou
+      // signalés absents par le site) : sinon une analyse suivante les croirait encore là.
+      function forgetRows(ids) {
+        const gone = ids instanceof Set ? ids : new Set(ids);
+        if (!gone.size) return;
+        for (const entry of readCache.values()) entry.rows = entry.rows.filter((row) => !gone.has(row?.id));
+      }
+
       async function loadCollection(rarities, onProgress, force = false) {
         const rows = [];
         const pending = new Set();
@@ -319,6 +327,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           const singleIds = keep.filter((id) => !byId.get(id)?.bulk);
           state.run.balance = null;
 
+          let emptyChunks = 0;
           for (let i = 0; i < bulkIds.length && !state.run.error; i += logic.BULK_CHUNK) {
             if (state.run.stop) { state.run.stopped = true; break; }
             const chunk = bulkIds.slice(i, i + logic.BULK_CHUNK);
@@ -333,18 +342,28 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
                 body: JSON.stringify(body)
               }), body.card_ids.length);
               state.run.done += result.discarded;
+              state.run.gone = (state.run.gone || 0) + result.gone;
               if (result.balance != null) state.run.balance = result.balance;
               if (result.ok) {
+                // Parties ou déjà absentes : dans les deux cas elles ne sont plus à traiter ni à garder en cache.
                 for (const id of chunk) state.doneIds.add(id);
+                forgetRows(chunk);
+                emptyChunks = result.discarded === 0 ? emptyChunks + 1 : 0;
+                if (emptyChunks >= 2) {
+                  state.freshRows = null;
+                  state.run.error = 'Le site n\'a défaussé aucune carte sur deux lots de suite : arrêt. Relance une analyse.';
+                }
               } else {
                 // Réponse incohérente : on ne sait pas lesquelles sont parties. Arrêt immédiat ;
                 // la collection sera relue à la prochaine analyse.
                 state.freshRows = null;
-                const refused = result.failed.map((f) => (typeof f === 'string' ? f : (f?.error || f?.message || f?.reason || f?.id || ''))).filter(Boolean).slice(0, 3).join(' ; ');
-                state.run.error = `Le site a défaussé ${fmt(result.discarded)} carte(s) sur ${fmt(body.card_ids.length)} envoyée(s)${result.failed.length ? ` (${fmt(result.failed.length)} refusée(s)${refused ? ` : ${refused}` : ''})` : ''}. Arrêt : relance une analyse.`;
+                readCache.clear();
+                const refused = result.failed.map(logic.failureCode).filter((c) => c && c !== 'card_not_owned').slice(0, 3).join(' ; ');
+                state.run.error = `Le site a défaussé ${fmt(result.discarded)} carte(s) sur ${fmt(body.card_ids.length)} envoyée(s)${refused ? ` (refus : ${refused})` : ''}. Arrêt : relance une analyse.`;
               }
             } catch (error) {
               state.freshRows = null;
+              readCache.clear();
               state.run.error = error.status === 401 || error.status === 403
                 ? 'Session expirée ou refusée : recharge la page wiki-masters puis réessaie.'
                 : error.status === 429
@@ -370,6 +389,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
               await fetchJson(url, { method: 'POST' });
               state.run.done += 1;
               state.doneIds.add(id);
+              forgetRows([id]);
             } catch (error) {
               state.run.error = error.status === 401 || error.status === 403
                 ? 'Session expirée ou refusée : recharge la page wiki-masters puis réessaie.'
@@ -701,6 +721,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         const gain = el('p', 'wm-discard-note', `Gain : +${fmt(run.done * GAIN_PER_DISCARD)} W (${fmt(GAIN_PER_DISCARD)} W par carte).`);
         gain.dataset.role = 'discard-gain';
         wrap.append(gain);
+        if (run.gone) wrap.append(el('p', 'wm-discard-note', `${plural(run.gone, 'carte n’était', 'cartes n’étaient')} déjà plus dans ta collection (lecture périmée) : ignorée${run.gone > 1 ? 's' : ''}.`));
         if (run.balance != null) wrap.append(el('p', 'wm-discard-note', `Solde actuel : ${fmt(run.balance)} W.`));
         if (run.dropped) wrap.append(el('p', 'wm-discard-note', `${plural(run.dropped, 'carte a été retirée', 'cartes ont été retirées')} de la liste : elles ont changé depuis l’analyse (favori, étiquette, famille, échange…).`));
         if (run.stopped) wrap.append(el('p', 'wm-discard-note', 'Arrêté à ta demande.'));

@@ -253,9 +253,18 @@ test('bulkBody / parseBulkResult : corps strict, réponse incohérente = refus',
   const L = require('../features/bulk-discard-logic.js').create();
   assert.deepEqual(L.bulkBody([H(1), H(1), 'pas-un-uuid', H(2)]), { card_ids: [H(1), H(2)] });
   assert.equal(L.bulkBody([]), null); assert.equal(L.bulkBody(['x']), null);
-  assert.deepEqual(L.parseBulkResult({ balance: 8425, discarded_count: 6, failed: [] }, 6), { ok: true, discarded: 6, failed: [], balance: 8425 });
+  assert.deepEqual(L.parseBulkResult({ balance: 8425, discarded_count: 6, failed: [] }, 6), { ok: true, discarded: 6, gone: 0, failed: [], balance: 8425 });
   assert.equal(L.parseBulkResult({ balance: 1, discarded_count: 5, failed: [] }, 6).ok, false);
   assert.equal(L.parseBulkResult({ discarded_count: 6, failed: ['x'] }, 6).ok, false);
   assert.equal(L.parseBulkResult({}, 6).ok, false);
   assert.equal(L.parseBulkResult(null, 6).balance, null);
+});
+
+test('parseBulkResult : card_not_owned = déjà partie (toléré) ; autre refus ou compte faux = incohérent', () => {
+  const L = require('../features/bulk-discard-logic.js').create();
+  const r = L.parseBulkResult({ balance: 5, discarded_count: 6, failed: Array(19).fill('card_not_owned') }, 25);
+  assert.equal(r.ok, true); assert.equal(r.discarded, 6); assert.equal(r.gone, 19);
+  assert.equal(L.parseBulkResult({ discarded_count: 6, failed: [{ id: 'a', error: 'card_not_owned' }] }, 7).ok, true);
+  assert.equal(L.parseBulkResult({ discarded_count: 5, failed: ['card_not_owned', 'in_trade'] }, 7).ok, false);
+  assert.equal(L.parseBulkResult({ discarded_count: 5, failed: ['card_not_owned'] }, 7).ok, false, 'compte qui ne tombe pas juste');
 });

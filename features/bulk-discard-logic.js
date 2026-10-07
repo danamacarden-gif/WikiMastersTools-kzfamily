@@ -215,13 +215,22 @@
       return ids.length ? { card_ids: ids } : null;
     }
 
+    const GONE = 'card_not_owned';
+    const failureCode = (f) => String(typeof f === 'string' ? f : (f?.error || f?.code || f?.reason || f?.message || '')).trim();
+
     // Lecture stricte de la réponse { balance, discarded_count, failed }.
+    // `card_not_owned` = l'exemplaire n'est plus dans la collection (déjà défaussé, lecture périmée) :
+    // c'est sans danger, on le compte à part (`gone`). Tout autre refus, ou un compte qui ne tombe pas
+    // juste, rend la réponse incohérente (`ok: false`) : on s'arrête.
     function parseBulkResult(json, sent) {
       const count = Number(json?.discarded_count);
       const failed = Array.isArray(json?.failed) ? json.failed : [];
       const balance = Number(json?.balance);
-      const ok = Number.isInteger(count) && count === sent && failed.length === 0;
-      return { ok, discarded: Number.isInteger(count) ? count : 0, failed, balance: Number.isFinite(balance) ? balance : null };
+      const gone = failed.filter((f) => failureCode(f) === GONE).length;
+      const other = failed.length - gone;
+      const discarded = Number.isInteger(count) ? count : 0;
+      const ok = Number.isInteger(count) && other === 0 && discarded + gone === sent;
+      return { ok, discarded, gone, failed, balance: Number.isFinite(balance) ? balance : null };
     }
 
     function discardUrl(userCardId) {
@@ -291,7 +300,7 @@
 
     return {
       PRICE_TTL_MS, NO_PRICE_TTL_MS, normalizePriceStore, lookupPrice, rememberPrice, prunePriceStore,
-      RARITIES, DEFAULT_LIMIT, MAX_LIMIT, LIST_CAP, PROTECTION_REASONS, BULK_URL, BULK_CHUNK, bulkBody, parseBulkResult,
+      RARITIES, DEFAULT_LIMIT, MAX_LIMIT, LIST_CAP, PROTECTION_REASONS, BULK_URL, BULK_CHUNK, bulkBody, parseBulkResult, failureCode,
       validateParams, normalizeRow, classify, buildPlan, defaultSelection, nextSelection, queueSize, withoutRows, unpricedToAdd, reverify, discardUrl, familyCardIds
     };
   }
