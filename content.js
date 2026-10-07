@@ -22,6 +22,8 @@
     'familyLogic',
     'themeTracker',
     'uiKit',
+    'listAuctionLogic',
+    'listAuction',
     'autoBidLogic',
     'myBidsLogic',
     'myBids',
@@ -102,12 +104,14 @@
   });
 
   runtime.modalUi = featureRegistry.modalUi.create();
+  runtime.uiKit = featureRegistry.uiKit.create();
+  runtime.listAuctionLogic = featureRegistry.listAuctionLogic.create();
+  runtime.listAuction = featureRegistry.listAuction.create(runtime);
   runtime.packs = featureRegistry.packs.create(runtime);
   runtime.ranking = featureRegistry.ranking.create(runtime);
   runtime.collectionBulk = featureRegistry.collectionBulk.create(runtime);
   runtime.extraTools = featureRegistry.extraTools.create(runtime);
   runtime.familyLogic = featureRegistry.familyLogic.create();
-  runtime.uiKit = featureRegistry.uiKit.create();
   runtime.autoBidLogic = featureRegistry.autoBidLogic.create();
   runtime.myBidsLogic = featureRegistry.myBidsLogic.create();
   runtime.themeTracker = featureRegistry.themeTracker.create(runtime);
