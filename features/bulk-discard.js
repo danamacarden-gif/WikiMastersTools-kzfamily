@@ -18,6 +18,8 @@
       const MAX_COLLECTION_PAGES = 800;
       const PAGE_DELAY_MS = 120;
       const DISCARD_DELAY_MS = 600;
+      // Collection lue depuis moins de 5 min : on ne la relit pas avant d'agir (la sélection vient d'être validée à l'écran).
+      const FRESH_READ_MS = 5 * 60 * 1000;
       const PRICE_POLL_MS = 500;
       const PRICE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -219,8 +221,11 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           await ensurePrices(candidates, (text, ratio) => setProgress(text, ratio), refresh === true);
 
           state.context = { ...context, familyCount: family.familyCount, rows };
+          state.rowsAt = Date.now();
           state.plan = logic.buildPlan(rows, context, state.params, priceOf);
           state.includeUnpriced = false;
+          state.freshRows = null;
+          state.freshContext = null;
           state.doneIds = new Set();
           state.nextPlan = null;
           state.selected = new Set(logic.nextSelection(state.plan.items, state.params.limit, false));
@@ -240,8 +245,15 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         render();
 
         try {
-          // Rien n'est supposé : tout est relu et recalculé juste avant d'agir.
-          const { rows, pending } = await loadCollection((text) => setProgress(text));
+          // Lecture récente : on réutilise ce qui vient d'être validé à l'écran (aucun rechargement).
+          // Sinon la collection est relue entièrement. Dans les deux cas, les familles sont relues
+          // (locales, instantanées) et le plan est recalculé et revérifié avant d'agir.
+          const reuse = state.freshRows
+            ? { rows: logic.withoutRows(state.freshRows, state.doneIds), pending: state.freshContext.pendingIds, at: state.freshAt }
+            : state.context?.rows ? { rows: logic.withoutRows(state.context.rows, state.doneIds), pending: state.context.pendingIds, at: state.rowsAt } : null;
+          const useCache = reuse && Date.now() - (reuse.at || 0) < FRESH_READ_MS;
+          const { rows, pending } = useCache ? reuse : await loadCollection((text) => setProgress(text));
+          const readAt = useCache ? reuse.at : Date.now();
           const family = readFamilyContext();
           const context = { familyCardIds: family.familyCardIds, pendingIds: pending };
           const fresh = logic.buildPlan(rows, context, { ...state.params, limit: Number.MAX_SAFE_INTEGER }, priceOf);
@@ -253,6 +265,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           const byId = new Map(fresh.eligible.map((item) => [item.userCardId, item]));
           state.freshRows = rows;
           state.freshContext = context;
+          state.freshAt = readAt;
 
           for (const id of keep) {
             if (state.run.stop) {
@@ -553,6 +566,13 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         wrap.append(
           el('div', 'wm-discard-warning', `Tu es sur le point de défausser définitivement ${plural(n, 'exemplaire', 'exemplaires')}. Tu recevras ${fmt(n * GAIN_PER_DISCARD)} W (${fmt(GAIN_PER_DISCARD)} W par carte). Cette action est irréversible. Avant d’agir, ta collection est relue et tout ce qui est devenu favori, étiqueté, dans une famille ou dans un échange est retiré de la liste.`)
         );
+        const readAt = state.freshRows ? state.freshAt : state.rowsAt;
+        const ageMin = readAt ? Math.floor((Date.now() - readAt) / 60000) : null;
+        if (ageMin != null) {
+          wrap.append(el('p', 'wm-discard-note', ageMin < Math.floor(FRESH_READ_MS / 60000)
+            ? `Collection lue il y a ${ageMin < 1 ? 'moins d’1 min' : `${ageMin} min`} : pas de relecture avant d’agir (les familles sont revérifiées).`
+            : 'Lecture de plus de 5 min : la collection sera relue avant d’agir.'));
+        }
         if (unpricedSelected) {
           wrap.append(el('div', 'wm-discard-warning', `Dont ${plural(unpricedSelected, 'carte sans prix connu', 'cartes sans prix connu')} : leur valeur est inconnue, tu peux défausser une carte qui vaut cher.`));
         }
