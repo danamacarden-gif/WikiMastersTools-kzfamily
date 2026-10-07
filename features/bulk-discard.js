@@ -11,6 +11,7 @@
       const ROUTE_CLASS = 'wm-discard-route';
       const SETTING_KEY = 'bulkDiscard';
       const FAMILIES_KEY = 'wm_families_v1';
+      const PRICE_STORE_KEY = 'wm_discard_prices_v1';
 
       // Une défausse rapporte 1 W par carte.
       const GAIN_PER_DISCARD = 1;
@@ -20,13 +21,16 @@
       const PRICE_POLL_MS = 500;
       const PRICE_TIMEOUT_MS = 10 * 60 * 1000;
 
-      const { readLocalValue, cacheMemory } = runtime.core;
+      const { readLocalValue, writeLocalValue, cacheMemory } = runtime.core;
       const logic = runtime.bulkDiscardLogic;
       const kit = runtime.uiKit;
       const numberFormat = new Intl.NumberFormat('fr-FR');
       const fmt = (value) => numberFormat.format(value);
       const plural = (n, one, many) => `${fmt(n)} ${n > 1 ? many : one}`;
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      // Prix retenus pour cette session (cardId -> prix | null), alimentés par la mémoire locale et les chargements.
+      const priceMemo = new Map();
 
       const state = {
         view: 'form', // form | analysing | preview | confirm | running | done | error
@@ -37,6 +41,7 @@
         selected: new Set(),
         ack: false,
         progress: '',
+        priceStats: { remembered: 0, fetched: 0 },
         run: { done: 0, total: 0, stop: false, dropped: 0, error: '', stopped: false },
         message: ''
       };
@@ -127,30 +132,65 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
       }
 
       function priceOf(cardId, rarity) {
+        if (priceMemo.has(cardId)) return priceMemo.get(cardId);
+
         const entry = cacheMemory.get(cardId);
         if (!entry || entry.ok === false) return null;
         const value = runtime.priceUi.chooseAverage(entry, null, rarity || null);
         return typeof value === 'number' && Number.isFinite(value) ? value : null;
       }
 
-      // Charge les prix manquants des seules cartes candidates (via le chargeur de prix existant).
-      async function ensurePrices(candidates, onProgress) {
-        const todo = candidates.filter((card) => !cacheMemory.has(card.cardId));
+      // Prix des cartes candidates : d'abord la mémoire locale (valable 7 jours), puis le cache de prix
+      // de l'extension, puis le site pour le reste seulement. `refresh` ignore la mémoire et recharge.
+      async function ensurePrices(candidates, onProgress, refresh = false) {
+        const now = Date.now();
+        const store = logic.normalizePriceStore(readLocalValue(PRICE_STORE_KEY));
+        const todo = [];
+
+        for (const card of candidates) {
+          const known = refresh ? { hit: false } : logic.lookupPrice(store, card.cardId, now);
+          if (known.hit) priceMemo.set(card.cardId, known.price);
+          else {
+            priceMemo.delete(card.cardId);
+            todo.push(card);
+          }
+        }
+
+        state.priceStats = { remembered: candidates.length - todo.length, fetched: 0 };
         if (!todo.length) return;
 
-        runtime.priceLoader.loadCacheForCards(todo.map((card) => ({ id: card.cardId, title: card.title, rarity: card.rarity })));
+        const forced = refresh ? new Set(todo.map((card) => card.rarity)) : null;
+        runtime.priceLoader.loadCacheForCards(
+          todo.map((card) => ({ id: card.cardId, title: card.title, rarity: card.rarity })),
+          forced ? { forceRarities: forced } : {}
+        );
         const startedAt = Date.now();
 
         for (;;) {
           const left = todo.filter((card) => runtime.priceLoader.isPending(card.cardId) || !cacheMemory.has(card.cardId));
           onProgress?.(`Chargement des prix… ${fmt(todo.length - left.length)} / ${fmt(todo.length)}`, (todo.length - left.length) / todo.length);
-          if (!left.length) return;
-          if (Date.now() - startedAt > PRICE_TIMEOUT_MS) return; // les cartes sans prix resteront exclues
+          if (!left.length) break;
+          if (Date.now() - startedAt > PRICE_TIMEOUT_MS) break; // les cartes sans prix resteront exclues
           await wait(PRICE_POLL_MS);
         }
+
+        // On mémorise ce que le site a réellement répondu ; une erreur de chargement n'est jamais retenue.
+        for (const card of todo) {
+          const entry = cacheMemory.get(card.cardId);
+          if (!entry || entry.ok === false || runtime.priceLoader.isPending(card.cardId)) continue;
+          const value = runtime.priceUi.chooseAverage(entry, null, card.rarity || null);
+          const price = typeof value === 'number' && Number.isFinite(value) ? value : null;
+          priceMemo.set(card.cardId, price);
+          logic.rememberPrice(store, card.cardId, price, now);
+          state.priceStats.fetched += 1;
+        }
+
+        try {
+          writeLocalValue(PRICE_STORE_KEY, logic.prunePriceStore(store, Date.now()));
+        } catch (_) { /* quota : la mémoire locale est un confort, jamais une nécessité */ }
       }
 
-      async function analyse() {
+      async function analyse(refresh = false) {
         const checked = logic.validateParams({
           rarities: [...state.form.rarities],
           maxPrice: state.form.maxPrice,
@@ -170,7 +210,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           const family = readFamilyContext();
           const context = { familyCardIds: family.familyCardIds, pendingIds: pending };
           const { candidates } = logic.classify(rows, { ...context, rarities: state.params.rarities });
-          await ensurePrices(candidates, (text, ratio) => setProgress(text, ratio));
+          await ensurePrices(candidates, (text, ratio) => setProgress(text, ratio), refresh === true);
 
           state.context = { ...context, familyCount: family.familyCount, rows };
           state.plan = logic.buildPlan(rows, context, state.params, priceOf);
@@ -327,7 +367,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         keep.addEventListener('change', () => { state.form.keepOne = keep.checked; });
         keepLabel.append(keep, el('span', '', 'Garder un exemplaire de chaque carte (ne défausser que les doublons)'));
 
-        const go = button('Analyser', 'is-primary', analyse, true, 'analyse');
+        const go = button('Analyser', 'is-primary', () => analyse(false), true, 'analyse');
         const hint = el('p', 'wm-discard-hint', 'Ne sont jamais défaussées, automatiquement : les cartes en favori, étiquetées, présentes dans une de tes familles, engagées dans un échange ou shiny.');
 
         const actions = el('div', 'wm-discard-actions');
@@ -359,12 +399,14 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           line('… dans un échange en cours', plan.counts.protectedBy.trade),
           line('… shiny', plan.counts.protectedBy.shiny),
           line('Écartées : valeur supérieure au maximum', plan.counts.aboveMax),
-          line('Écartées : prix inconnu', plan.counts.unpriced, 'unpriced')
+          line('Écartées : prix inconnu', plan.counts.unpriced, 'unpriced'),
+          line('Prix repris de la mémoire locale / chargés à l’instant', state.priceStats.remembered, 'price-source')
         );
+        lines.lastChild.lastChild.textContent = `${fmt(state.priceStats.remembered)} / ${fmt(state.priceStats.fetched)}`;
         wrap.append(lines);
 
         if (plan.counts.unpriced) {
-          wrap.append(el('p', 'wm-discard-hint', 'Les cartes sans prix sont ignorées par sécurité. Le chargement a pu échouer ou le site n’a pas de prix pour elles.'));
+          wrap.append(el('p', 'wm-discard-hint', 'Les cartes sans prix sont ignorées par sécurité. Le chargement a pu échouer ou le site n’a pas de prix pour elles. « Actualiser les prix » les recharge.'));
         }
         if (plan.overLimit > 0) {
           wrap.append(el('p', 'wm-discard-note', `${plural(plan.overLimit, 'autre exemplaire est éligible', 'autres exemplaires sont éligibles')} mais dépasse${plan.overLimit > 1 ? 'nt' : ''} le lot maximum : relance après celui-ci.`));
@@ -373,7 +415,10 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         if (!plan.items.length) {
           wrap.append(el('p', 'wm-discard-note', 'Aucune carte à défausser avec ces critères.'));
           const actions = el('div', 'wm-discard-actions');
-          actions.append(button('Modifier les critères', '', () => { state.view = 'form'; render(); }));
+          actions.append(
+            button('Modifier les critères', '', () => { state.view = 'form'; render(); }),
+            button('Actualiser les prix', '', () => analyse(true), false, 'refresh-prices')
+          );
           wrap.append(actions);
           return wrap;
         }
@@ -413,7 +458,8 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         const actions = el('div', 'wm-discard-actions');
         actions.append(
           button('Défausser…', 'is-danger', () => { state.view = 'confirm'; render(); }, true, 'to-confirm'),
-          button('Modifier les critères', '', () => { state.view = 'form'; render(); })
+          button('Modifier les critères', '', () => { state.view = 'form'; render(); }),
+          button('Actualiser les prix', '', () => analyse(true), false, 'refresh-prices')
         );
         wrap.append(actions);
         return wrap;

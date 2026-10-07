@@ -137,3 +137,50 @@ test('discardUrl : uuid seulement ; familyCardIds : toutes les familles', () => 
   assert.deepEqual([...set].sort(), ['a', 'b']);
   assert.equal(logic.familyCardIds(null).size, 0);
 });
+
+// ---- Mémoire des prix ------------------------------------------------------------
+test('priceStore : un prix connu reste valable 7 jours, « pas de prix » 24 h', () => {
+  const now = 1_700_000_000_000; const DAY = 24 * 3600 * 1000;
+  const store = {};
+  logic.rememberPrice(store, H(1), 2.5, now - 6 * DAY);
+  logic.rememberPrice(store, H(2), 2.5, now - 8 * DAY);
+  logic.rememberPrice(store, H(3), null, now - 2 * 3600 * 1000);
+  logic.rememberPrice(store, H(4), null, now - 2 * DAY);
+  assert.deepEqual(logic.lookupPrice(store, H(1), now), { hit: true, price: 2.5 });
+  assert.equal(logic.lookupPrice(store, H(2), now).hit, false);
+  assert.deepEqual(logic.lookupPrice(store, H(3), now), { hit: true, price: null });
+  assert.equal(logic.lookupPrice(store, H(4), now).hit, false);
+  assert.equal(logic.lookupPrice(store, H(5), now).hit, false);
+  assert.equal(logic.lookupPrice(null, H(1), now).hit, false);
+});
+
+test('priceStore : un prix de 0 est un vrai prix ; valeurs invalides jamais mémorisées', () => {
+  const store = {}; const now = Date.now();
+  logic.rememberPrice(store, H(1), 0, now);
+  assert.deepEqual(logic.lookupPrice(store, H(1), now), { hit: true, price: 0 });
+  for (const bad of [NaN, undefined, 'x', -1, Infinity]) logic.rememberPrice(store, H(2), bad, now);
+  logic.rememberPrice(store, 'pas-un-uuid', 1, now);
+  assert.deepEqual(Object.keys(store), [H(1)]);
+});
+
+test('priceStore : un horodatage futur est périmé ; normalizePriceStore écarte le bruit', () => {
+  const now = 1_700_000_000_000;
+  assert.equal(logic.lookupPrice({ [H(1)]: [1, now + 5000] }, H(1), now).hit, false);
+  const clean = logic.normalizePriceStore({
+    [H(1)]: [1, now], [H(2)]: [null, now], [H(3)]: ['x', now], [H(4)]: [1], [H(5)]: [1, 'a'],
+    'pas-un-uuid': [1, now], [H(6)]: 'oops', [H(7)]: [-3, now]
+  });
+  assert.deepEqual(Object.keys(clean).sort(), [H(1), H(2)].sort());
+  for (const bad of [null, undefined, 'x', [], 5]) assert.deepEqual(logic.normalizePriceStore(bad), {});
+});
+
+test('priceStore : prune retire les périmés puis les plus anciens au-delà du plafond', () => {
+  const now = 1_700_000_000_000; const DAY = 24 * 3600 * 1000;
+  const store = {};
+  logic.rememberPrice(store, H(1), 1, now - 10 * DAY);   // périmé
+  logic.rememberPrice(store, H(2), 1, now - 3 * DAY);
+  logic.rememberPrice(store, H(3), 1, now - 2 * DAY);
+  logic.rememberPrice(store, H(4), 1, now - 1 * DAY);
+  logic.prunePriceStore(store, now, 2);
+  assert.deepEqual(Object.keys(store).sort(), [H(3), H(4)].sort());
+});

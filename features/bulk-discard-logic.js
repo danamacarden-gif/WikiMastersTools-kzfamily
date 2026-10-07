@@ -11,6 +11,12 @@
   // Raisons de protection, par ordre de priorité d'affichage.
   const PROTECTION_REASONS = ['trade', 'starred', 'tagged', 'shiny', 'family'];
 
+  // Mémoire locale des prix, propre à la défausse : un prix connu reste valable 7 jours (les
+  // communes et peu communes bougent peu) ; « pas de prix » seulement 24 h.
+  const PRICE_TTL_MS = 7 * 24 * 3600 * 1000;
+  const NO_PRICE_TTL_MS = 24 * 3600 * 1000;
+  const PRICE_STORE_MAX = 30000;
+
   function create() {
     const isUuid = (value) => typeof value === 'string' && UUID.test(value);
 
@@ -170,7 +176,59 @@
       return ids;
     }
 
+    // ---- Mémoire des prix --------------------------------------------------------------------
+    // Forme stockée : { [cardId]: [prix | null, horodatage] }. Tout ce qui n'a pas cette forme est
+    // ignoré, et un horodatage dans le futur est traité comme périmé.
+    function normalizePriceStore(raw) {
+      const store = {};
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return store;
+
+      for (const [cardId, entry] of Object.entries(raw)) {
+        if (!isUuid(cardId) || !Array.isArray(entry)) continue;
+        const [price, at] = entry;
+        const validPrice = price === null || (typeof price === 'number' && Number.isFinite(price) && price >= 0);
+        if (validPrice && Number.isFinite(at) && at > 0) store[cardId] = [price, at];
+      }
+
+      return store;
+    }
+
+    // { hit: true, price } si un prix (ou « pas de prix ») encore valable est mémorisé.
+    function lookupPrice(store, cardId, now = Date.now()) {
+      const entry = store?.[cardId];
+      if (!Array.isArray(entry)) return { hit: false };
+
+      const [price, at] = entry;
+      const age = now - at;
+      const ttl = price === null ? NO_PRICE_TTL_MS : PRICE_TTL_MS;
+      if (!Number.isFinite(age) || age < 0 || age > ttl) return { hit: false };
+
+      return { hit: true, price };
+    }
+
+    function rememberPrice(store, cardId, price, now = Date.now()) {
+      if (!isUuid(cardId)) return;
+      const valid = price === null || (typeof price === 'number' && Number.isFinite(price) && price >= 0);
+      if (valid) store[cardId] = [price, now];
+    }
+
+    // Supprime les entrées périmées, puis les plus anciennes au-delà du plafond.
+    function prunePriceStore(store, now = Date.now(), max = PRICE_STORE_MAX) {
+      for (const cardId of Object.keys(store)) {
+        if (!lookupPrice(store, cardId, now).hit) delete store[cardId];
+      }
+
+      const ids = Object.keys(store);
+      if (ids.length > max) {
+        ids.sort((a, b) => store[a][1] - store[b][1]);
+        for (const cardId of ids.slice(0, ids.length - max)) delete store[cardId];
+      }
+
+      return store;
+    }
+
     return {
+      PRICE_TTL_MS, NO_PRICE_TTL_MS, normalizePriceStore, lookupPrice, rememberPrice, prunePriceStore,
       RARITIES, DEFAULT_LIMIT, MAX_LIMIT, PROTECTION_REASONS,
       validateParams, normalizeRow, classify, buildPlan, reverify, discardUrl, familyCardIds
     };
