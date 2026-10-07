@@ -30,6 +30,11 @@
       const WISHLIST_PAGE_SIZE = 1000;
       const WISHLIST_DELETE_CHUNK = 50;
       const WISHLIST_INSERT_CHUNK = 100;
+      // Étiquettes : table user_card_tags (une ligne par exemplaire possédé et par étiquette).
+      const TAG_INSERT_CHUNK = 100;
+      const TAG_MAX_PAGES = 80;
+      const TAG_AUTO_INTERVAL_MS = 6 * 3600 * 1000;
+      let autoTagRunning = false;
 
       let activeFamilyId = null;
       let editingFamilyId = null;
@@ -1249,6 +1254,7 @@
               ...card,
               owned: true,
               ownedCount: Math.max(ownedInfo.count, ownedInfo.ownedCardIds.size || 1),
+              ownedCardIds: [...ownedInfo.ownedCardIds],
               ownershipCheckedAt: Date.now()
             };
           }
@@ -1717,6 +1723,332 @@
         }
       }
 
+      // ---- Étiquettes de famille -----------------------------------------------------------
+
+      async function fetchTagOptionsList() {
+        const json = await fetchJson('/api/my-collection?sort=rarity&page=0&stats=1', { credentials: 'include' });
+        const seen = new Set();
+        const tags = [];
+
+        for (const raw of Array.isArray(json?.tagOptions) ? json.tagOptions : []) {
+          const tag = raw?.tag && typeof raw.tag === 'object' ? raw.tag : raw;
+          const id = tag?.id ? String(tag.id) : '';
+          const name = String(tag?.name || '').trim();
+          if (!id || !name || seen.has(id)) continue;
+          seen.add(id);
+          tags.push({ id, name });
+        }
+
+        return tags.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+      }
+
+      // Exemplaires (user_card_id) qui portent déjà l'étiquette, via le filtre de la collection du site.
+      async function readTaggedUserCardIds(tagId) {
+        const ids = new Set();
+        let pageSize = 0;
+
+        for (let page = 0; page < TAG_MAX_PAGES; page += 1) {
+          const json = await fetchJson(
+            `/api/my-collection?sort=rarity&tag_id=${encodeURIComponent(tagId)}&page=${page}&stats=0`,
+            { credentials: 'include' }
+          );
+          const rows = Array.isArray(json?.collection) ? json.collection : [];
+          if (page === 0) pageSize = rows.length;
+          for (const row of rows) if (row?.id) ids.add(row.id);
+          if (!rows.length || rows.length < pageSize) break;
+        }
+
+        return ids;
+      }
+
+      async function loadTagPlan(family, tagId) {
+        return familyLogic.planTagSync(family.cards, await readTaggedUserCardIds(tagId));
+      }
+
+      // Ajouts seulement : on ne retire jamais une étiquette. `done.added` suit l'avancement.
+      async function applyTagPlan(tagId, plan, done) {
+        for (const items of familyLogic.chunk(plan.toAdd, TAG_INSERT_CHUNK)) {
+          const body = familyLogic.tagInsertBody(tagId, items.map((item) => item.userCardId));
+          if (!body) continue;
+          await wishlistFetch(`${SUPABASE_REST}user_card_tags`, {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify(body)
+          });
+          done.added += body.length;
+        }
+      }
+
+      function setFamilyTagSync(familyIdValue, patch) {
+        const fresh = getFamily(familyIdValue);
+        if (!fresh) return null;
+        const next = patch === null ? null : { ...(fresh.tagSync || {}), ...patch };
+        const updated = { ...fresh };
+        if (next) updated.tagSync = next;
+        else delete updated.tagSync;
+        saveFamily(updated);
+        return updated;
+      }
+
+      // Synchro automatique à l'ouverture d'une famille liée : au plus une fois toutes les 6 h,
+      // rafraîchit d'abord « mes cartes » (les cartes gagnées aux enchères apparaissent), puis
+      // étiquette les exemplaires manquants. Silencieuse : un échec n'affiche rien.
+      async function maybeAutoTagSync(family) {
+        if (autoTagRunning || !family || !familyLogic.shouldAutoTagSync(family.tagSync, Date.now(), TAG_AUTO_INTERVAL_MS)) return;
+        if (!bidLogic.parseUserIdFromCookies(document.cookie)) return;
+
+        autoTagRunning = true;
+        const familyIdValue = family.id;
+        const tagId = family.tagSync.tagId;
+        setFamilyTagSync(familyIdValue, { lastAutoAt: Date.now() });
+
+        try {
+          try {
+            registerFamilyCards(await completeOwnedCards(getFamily(familyIdValue) || family, () => {}));
+          } catch (error) {
+            // Rafraîchissement impossible : on étiquette quand même avec les cartes déjà connues.
+            console.debug('[WM Average] rafraîchissement des cartes ignoré avant étiquetage', error);
+          }
+          const refreshed = getFamily(familyIdValue) || family;
+          const plan = await loadTagPlan(getFamily(familyIdValue) || refreshed, tagId);
+          const done = { added: 0 };
+          await applyTagPlan(tagId, plan, done);
+          setFamilyTagSync(familyIdValue, { lastAutoAdded: done.added });
+        } catch (error) {
+          console.debug('[WM Average] synchro auto des étiquettes ignorée', error);
+        } finally {
+          autoTagRunning = false;
+        }
+
+        if (activeFamilyId === familyIdValue && !document.querySelector('.wm-family-modal-overlay')) {
+          renderPageContent();
+        }
+      }
+
+      function openTagModal(family) {
+        if (document.querySelector('.wm-family-tag-overlay')) return;
+        ensureInlineStyles();
+
+        const familyIdValue = family.id;
+        const userId = bidLogic.parseUserIdFromCookies(document.cookie);
+        const plural = (n, one, many) => `${n.toLocaleString('fr-FR')} ${n > 1 ? many : one}`;
+        const done = { added: 0 };
+        let plan = null;
+        let tags = [];
+        let chosen = { tagId: family.tagSync?.tagId || '', auto: family.tagSync?.auto === true };
+
+        const overlay = document.createElement('div');
+        overlay.className = 'wm-family-modal-overlay wm-family-tag-overlay';
+        const modal = document.createElement('div');
+        modal.className = 'wm-family-modal wm-family-wishlist-modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-label', 'Étiquette de la famille');
+        overlay.append(modal);
+
+        const close = () => {
+          document.removeEventListener('keydown', onKeydown, true);
+          overlay.remove();
+          if (activeFamilyId === familyIdValue) renderPageContent();
+        };
+        const onKeydown = (event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            close();
+          }
+        };
+        document.addEventListener('keydown', onKeydown, true);
+        overlay.addEventListener('click', (event) => {
+          if (event.target === overlay) close();
+        });
+
+        const button = (label, className, onClick, disabled = false) => {
+          const element = document.createElement('button');
+          element.type = 'button';
+          element.className = className;
+          element.textContent = label;
+          element.disabled = disabled;
+          element.addEventListener('click', onClick);
+          return element;
+        };
+        const note = (text, kind = '') => {
+          const element = document.createElement('p');
+          element.className = 'wm-family-wishlist-note';
+          if (kind) element.dataset.kind = kind;
+          element.textContent = text;
+          return element;
+        };
+        const line = (label, value) => {
+          const row = document.createElement('div');
+          const text = document.createElement('span');
+          text.textContent = label;
+          const count = document.createElement('strong');
+          count.textContent = Number(value).toLocaleString('fr-FR');
+          row.append(text, count);
+          return row;
+        };
+        const actions = (...buttons) => {
+          const row = document.createElement('div');
+          row.className = 'wm-family-wishlist-actions';
+          row.append(...buttons);
+          return row;
+        };
+        const show = (...nodes) => {
+          const title = document.createElement('h2');
+          title.textContent = 'Étiquette de la famille';
+          modal.replaceChildren(title, ...nodes);
+        };
+        const tagName = (id) => tags.find((tag) => tag.id === id)?.name || '';
+
+        const showError = (message, retry = showChoice) => {
+          const partial = done.added ? ` Déjà fait avant l'erreur : ${plural(done.added, 'exemplaire étiqueté', 'exemplaires étiquetés')}.` : '';
+          show(note(`${message}${partial}`, 'error'), actions(
+            button('Réessayer', 'wm-family-primary', retry),
+            button('Fermer', 'wm-family-secondary', close)
+          ));
+        };
+
+        function showChoice() {
+          done.added = 0;
+          const select = document.createElement('select');
+          select.className = 'wm-family-tag-select';
+          select.dataset.role = 'tag-select';
+          select.setAttribute('aria-label', 'Étiquette à associer à la famille');
+          const none = document.createElement('option');
+          none.value = '';
+          none.textContent = tags.length ? '— Aucune étiquette —' : '— Aucune étiquette trouvée —';
+          select.append(none);
+          for (const tag of tags) {
+            const option = document.createElement('option');
+            option.value = tag.id;
+            option.textContent = tag.name;
+            select.append(option);
+          }
+          select.value = tags.some((tag) => tag.id === chosen.tagId) ? chosen.tagId : '';
+          select.addEventListener('change', () => { chosen.tagId = select.value; sync(); });
+
+          const autoLabel = document.createElement('label');
+          autoLabel.className = 'wm-family-tag-auto';
+          const auto = document.createElement('input');
+          auto.type = 'checkbox';
+          auto.dataset.role = 'tag-auto';
+          auto.checked = chosen.auto;
+          auto.addEventListener('change', () => { chosen.auto = auto.checked; });
+          const autoText = document.createElement('span');
+          autoText.textContent = 'Synchroniser automatiquement à l’ouverture de la famille (au plus toutes les 6 h)';
+          autoLabel.append(auto, autoText);
+
+          const analyse = button('Analyser', 'wm-family-primary', run, !select.value);
+          analyse.dataset.role = 'tag-analyse';
+          const save = button('Enregistrer sans appliquer', 'wm-family-secondary', saveOnly);
+          function sync() { analyse.disabled = !select.value; }
+
+          show(
+            note(`Famille « ${family.name} ». L’étiquette se pose sur tes exemplaires possédés ; une carte que tu n’as pas ne peut pas être étiquetée, elle le sera dès que tu l’auras.`),
+            select,
+            autoLabel,
+            actions(analyse, save),
+            actions(button('Fermer', 'wm-family-secondary', close))
+          );
+        }
+
+        function persist(appliedNow = false) {
+          if (!chosen.tagId) {
+            setFamilyTagSync(familyIdValue, null);
+            return;
+          }
+          setFamilyTagSync(familyIdValue, {
+            tagId: chosen.tagId,
+            tagName: tagName(chosen.tagId),
+            auto: chosen.auto,
+            lastAutoAt: appliedNow ? Date.now() : 0
+          });
+        }
+
+        function saveOnly() {
+          persist();
+          show(
+            note(chosen.tagId ? `Étiquette « ${tagName(chosen.tagId)} » associée à la famille.` : 'Association supprimée.', 'success'),
+            actions(button('Fermer', 'wm-family-secondary', close))
+          );
+        }
+
+        async function run() {
+          persist(true);
+          done.added = 0;
+          show(note('Lecture de tes cartes étiquetées…'));
+          try {
+            plan = await loadTagPlan(getFamily(familyIdValue) || family, chosen.tagId);
+          } catch (error) {
+            showError(String(error?.message || error), run);
+            return;
+          }
+          showConfirm();
+        }
+
+        function showConfirm() {
+          const total = plan.toAdd.length;
+          const nodes = [
+            note(`Étiquette « ${tagName(chosen.tagId)} » — famille « ${family.name} ».`),
+            (() => {
+              const lines = document.createElement('div');
+              lines.className = 'wm-family-wishlist-lines';
+              lines.append(
+                line('Exemplaires à étiqueter', plan.toAdd.length),
+                line('Déjà étiquetés', plan.alreadyTagged),
+                line('Cartes non possédées (ignorées)', plan.notOwned)
+              );
+              return lines;
+            })()
+          ];
+
+          if (plan.unchecked || plan.needsReload) {
+            nodes.push(note(
+              `${plural(plan.unchecked + plan.needsReload, 'carte est à vérifier', 'cartes sont à vérifier')} : clique sur « Charger mes cartes » dans la famille puis relance l’analyse pour les inclure.`,
+              'error'
+            ));
+          }
+          if (!total) nodes.push(note('Rien à faire : tous tes exemplaires de cette famille portent déjà l’étiquette.', 'success'));
+
+          const apply = button(total ? `Étiqueter ${plural(total, 'exemplaire', 'exemplaires')}` : 'Étiqueter', 'wm-family-primary', apply_, total === 0);
+          apply.dataset.role = 'tag-apply';
+          nodes.push(actions(apply, button('Fermer', 'wm-family-secondary', close)));
+          show(...nodes);
+        }
+
+        async function apply_() {
+          show(note('Pose de l’étiquette…'));
+          try {
+            await applyTagPlan(chosen.tagId, plan, done);
+          } catch (error) {
+            showError(String(error?.message || error), apply_);
+            return;
+          }
+          show(
+            note(`Terminé : ${plural(done.added, 'exemplaire étiqueté', 'exemplaires étiquetés')}.`, 'success'),
+            actions(button('Fermer', 'wm-family-secondary', close))
+          );
+        }
+
+        document.body.append(overlay);
+        if (!userId) {
+          showError('Session wiki-masters introuvable : reconnecte-toi et recharge la page.');
+          return;
+        }
+
+        show(note('Lecture de tes étiquettes…'));
+        fetchTagOptionsList().then((list) => {
+          tags = list;
+          showChoice();
+        }, (error) => showError(String(error?.message || error), () => openTagReload()));
+
+        function openTagReload() {
+          show(note('Lecture de tes étiquettes…'));
+          fetchTagOptionsList().then((list) => { tags = list; showChoice(); },
+            (error) => showError(String(error?.message || error), openTagReload));
+        }
+      }
+
       // Clic sur une carte : ouvre le Marché des cartes manquantes sur cette seule carte
       // et lance la recherche d'annonces.
       function searchCardOnMarket(family, card) {
@@ -2133,8 +2465,35 @@
   gap: 10px;
 }
 
-.wm-family-wishlist-button {
+.wm-family-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-left: auto;
+}
+
+.wm-family-tag-select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.14));
+  border-radius: 10px;
+  background: var(--color-surface, #111114);
+  color: inherit;
+  font: inherit;
+}
+
+.wm-family-tag-auto {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.wm-family-tag-auto input {
+  margin-top: 2px;
 }
 
 .wm-family-wishlist-modal {
@@ -3375,9 +3734,22 @@
         wishlistButton.disabled = family.cards.length === 0;
         wishlistButton.addEventListener('click', () => openWishlistModal(family));
 
+        const tagButton = document.createElement('button');
+        tagButton.type = 'button';
+        tagButton.className = 'wm-family-secondary wm-family-tag-button';
+        tagButton.dataset.role = 'tag-sync';
+        tagButton.textContent = family.tagSync?.tagName ? `🏷 ${family.tagSync.tagName}` : '🏷 Étiquette';
+        tagButton.title = 'Associer une de tes étiquettes à cette famille et l’appliquer à tes cartes possédées';
+        tagButton.disabled = family.cards.length === 0;
+        tagButton.addEventListener('click', () => openTagModal(family));
+
+        const filterActions = document.createElement('div');
+        filterActions.className = 'wm-family-filter-actions';
+        filterActions.append(tagButton, wishlistButton);
+
         const filterRow = document.createElement('div');
         filterRow.className = 'wm-family-filter-row';
-        filterRow.append(filters, wishlistButton);
+        filterRow.append(filters, filterActions);
 
         wrap.append(top, editBanner, heading, progress, filterRow, rarityRow, toolbar, empty, grid, more);
         requestAnimationFrame(() => renderDetailGrid(family, wrap));
@@ -3986,6 +4358,7 @@
         if (activeFamilyId && !family) activeFamilyId = null;
 
         content.replaceChildren(family ? buildDetail(family) : buildHome());
+        if (family) maybeAutoTagSync(family);
       }
 
       function ensurePage() {

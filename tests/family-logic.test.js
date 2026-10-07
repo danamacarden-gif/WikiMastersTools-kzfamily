@@ -308,3 +308,54 @@ test('sortByNextEnd : fin la plus proche d\'abord, sans enchère en dernier, alp
   assert.equal(logic.nextEndTime([], now), null);
   assert.deepEqual(logic.sortByNextEnd(null, () => [], now), []);
 });
+
+// ---- Étiquettes de famille -------------------------------------------------------
+const TU = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+test('planTagSync : étiquette les exemplaires possédés qui ne l’ont pas', () => {
+  const cards = [
+    { id: TU(1), title: 'A', owned: true, ownedCardIds: [TU(101), TU(102)] },
+    { id: TU(2), title: 'B', owned: true, ownedCardIds: [TU(103)] },
+    { id: TU(3), title: 'C', owned: false },
+    { id: TU(4), title: 'D', owned: null },
+    { id: TU(5), title: 'E', owned: true }
+  ];
+  const plan = logic.planTagSync(cards, new Set([TU(103), TU(999)]));
+
+  assert.deepEqual(plan.toAdd.map((x) => x.userCardId), [TU(101), TU(102)]);
+  assert.equal(plan.alreadyTagged, 1);
+  assert.equal(plan.notOwned, 1);
+  assert.equal(plan.unchecked, 1);
+  assert.equal(plan.needsReload, 1);
+});
+
+test('planTagSync : ignore ids invalides et doublons, tolère les entrées vides', () => {
+  const cards = [
+    { id: TU(1), owned: true, ownedCardIds: [TU(101), TU(101), 'pas-un-uuid'] },
+    { id: TU(1), owned: true, ownedCardIds: [TU(102)] },
+    null
+  ];
+  assert.deepEqual(logic.planTagSync(cards, []).toAdd.map((x) => x.userCardId), [TU(101)]);
+  assert.equal(logic.planTagSync(null, null).toAdd.length, 0);
+});
+
+test('tagInsertBody : lignes {user_card_id, tag_id}, uuid seulement, sans doublon', () => {
+  assert.deepEqual(logic.tagInsertBody(TU(9), [TU(1), TU(1), 'x', TU(2)]), [
+    { user_card_id: TU(1), tag_id: TU(9) },
+    { user_card_id: TU(2), tag_id: TU(9) }
+  ]);
+  assert.equal(logic.tagInsertBody('x', [TU(1)]), null);
+  assert.equal(logic.tagInsertBody(TU(9), []), null);
+});
+
+test('shouldAutoTagSync : actif, étiquette choisie, au plus une fois par 6 h', () => {
+  const now = 1_000_000_000_000;
+  const H = 3600000;
+  assert.equal(logic.shouldAutoTagSync(null, now), false);
+  assert.equal(logic.shouldAutoTagSync({ auto: false, tagId: TU(1) }, now), false);
+  assert.equal(logic.shouldAutoTagSync({ auto: true, tagId: 'x' }, now), false);
+  assert.equal(logic.shouldAutoTagSync({ auto: true, tagId: TU(1) }, now), true);
+  assert.equal(logic.shouldAutoTagSync({ auto: true, tagId: TU(1), lastAutoAt: now - 2 * H }, now), false);
+  assert.equal(logic.shouldAutoTagSync({ auto: true, tagId: TU(1), lastAutoAt: now - 7 * H }, now), true);
+  assert.equal(logic.shouldAutoTagSync({ auto: true, tagId: TU(1), lastAutoAt: now + H }, now), true);
+});
