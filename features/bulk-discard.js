@@ -18,6 +18,7 @@
       const MAX_COLLECTION_PAGES = 800;
       const PAGE_DELAY_MS = 120;
       const DISCARD_DELAY_MS = 600;
+      const BULK_DELAY_MS = 500;
       // Collection lue depuis moins de 5 min : on ne la relit pas avant d'agir (la sélection vient d'être validée à l'écran).
       const FRESH_READ_MS = 5 * 60 * 1000;
       const PRICE_POLL_MS = 500;
@@ -267,7 +268,50 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           state.freshContext = context;
           state.freshAt = readAt;
 
-          for (const id of keep) {
+          // 1) Cartes à exemplaire unique : appel groupé du site (bulk-discard), par lots.
+          const bulkIds = keep.filter((id) => byId.get(id)?.bulk);
+          const singleIds = keep.filter((id) => !byId.get(id)?.bulk);
+          state.run.balance = null;
+
+          for (let i = 0; i < bulkIds.length && !state.run.error; i += logic.BULK_CHUNK) {
+            if (state.run.stop) { state.run.stopped = true; break; }
+            const chunk = bulkIds.slice(i, i + logic.BULK_CHUNK);
+            const body = logic.bulkBody(chunk.map((id) => byId.get(id).cardId));
+            if (!body) continue;
+            setProgress(`Défausse… ${fmt(state.run.done)} / ${fmt(keep.length)}`, state.run.done / Math.max(1, keep.length));
+
+            try {
+              const result = logic.parseBulkResult(await fetchJson(logic.BULK_URL, {
+                method: 'POST',
+                headers: { accept: '*/*', 'content-type': 'application/json' },
+                body: JSON.stringify(body)
+              }), body.card_ids.length);
+              state.run.done += result.discarded;
+              if (result.balance != null) state.run.balance = result.balance;
+              if (result.ok) {
+                for (const id of chunk) state.doneIds.add(id);
+              } else {
+                // Réponse incohérente : on ne sait pas lesquelles sont parties. Arrêt immédiat ;
+                // la collection sera relue à la prochaine analyse.
+                state.freshRows = null;
+                const refused = result.failed.map((f) => (typeof f === 'string' ? f : (f?.error || f?.message || f?.reason || f?.id || ''))).filter(Boolean).slice(0, 3).join(' ; ');
+                state.run.error = `Le site a défaussé ${fmt(result.discarded)} carte(s) sur ${fmt(body.card_ids.length)} envoyée(s)${result.failed.length ? ` (${fmt(result.failed.length)} refusée(s)${refused ? ` : ${refused}` : ''})` : ''}. Arrêt : relance une analyse.`;
+              }
+            } catch (error) {
+              state.freshRows = null;
+              state.run.error = error.status === 401 || error.status === 403
+                ? 'Session expirée ou refusée : recharge la page wiki-masters puis réessaie.'
+                : error.status === 429
+                  ? 'Le site limite les requêtes (429) : arrêt, réessaie plus tard.'
+                  : `Erreur du site : ${error.message}`;
+              state.run.error += ' Relance une analyse pour savoir ce qui est parti.';
+            }
+            if (!state.run.error) await wait(BULK_DELAY_MS);
+          }
+
+          // 2) Exemplaires supplémentaires d'une même carte (lignes distinctes) : appel unitaire, comme avant.
+          for (const id of singleIds) {
+            if (state.run.error) break;
             if (state.run.stop) {
               state.run.stopped = true;
               break;
@@ -394,7 +438,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         keepLabel.append(keep, el('span', '', 'Garder un exemplaire de chaque carte (ne défausser que les doublons)'));
 
         const go = button('Analyser', 'is-primary', () => analyse(false), true, 'analyse');
-        const hint = el('p', 'wm-discard-hint', 'Ne sont jamais défaussées, automatiquement : les cartes en favori, étiquetées, présentes dans une de tes familles, engagées dans un échange ou shiny.');
+        const hint = el('p', 'wm-discard-hint', 'Ne sont jamais défaussées, automatiquement : les cartes en favori, étiquetées, présentes dans une de tes familles, engagées dans un échange, shiny ou empilées en plusieurs exemplaires.');
 
         const actions = el('div', 'wm-discard-actions');
         actions.append(go);
@@ -424,6 +468,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           line('… dans une famille', plan.counts.protectedBy.family),
           line('… dans un échange en cours', plan.counts.protectedBy.trade),
           line('… shiny', plan.counts.protectedBy.shiny),
+          line('… en plusieurs exemplaires empilés (non traitées)', plan.counts.protectedBy.stack),
           line('Écartées : valeur supérieure au maximum', plan.counts.aboveMax),
           line('Sans prix connu (listées plus bas, non cochées)', plan.counts.unpriced, 'unpriced'),
           line('Prix repris de la mémoire locale / chargés à l’instant', state.priceStats.remembered, 'price-source')
@@ -606,6 +651,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         const gain = el('p', 'wm-discard-note', `Gain : +${fmt(run.done * GAIN_PER_DISCARD)} W (${fmt(GAIN_PER_DISCARD)} W par carte).`);
         gain.dataset.role = 'discard-gain';
         wrap.append(gain);
+        if (run.balance != null) wrap.append(el('p', 'wm-discard-note', `Solde actuel : ${fmt(run.balance)} W.`));
         if (run.dropped) wrap.append(el('p', 'wm-discard-note', `${plural(run.dropped, 'carte a été retirée', 'cartes ont été retirées')} de la liste : elles ont changé depuis l’analyse (favori, étiquette, famille, échange…).`));
         if (run.stopped) wrap.append(el('p', 'wm-discard-note', 'Arrêté à ta demande.'));
         if (run.error) {

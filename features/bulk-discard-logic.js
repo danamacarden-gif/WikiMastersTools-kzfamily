@@ -11,7 +11,7 @@
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   // Raisons de protection, par ordre de priorité d'affichage.
-  const PROTECTION_REASONS = ['trade', 'starred', 'tagged', 'shiny', 'family'];
+  const PROTECTION_REASONS = ['trade', 'starred', 'tagged', 'shiny', 'family', 'stack'];
 
   // Mémoire locale des prix, propre à la défausse : un prix connu reste valable 7 jours (les
   // communes et peu communes bougent peu) ; « pas de prix » seulement 24 h.
@@ -57,6 +57,9 @@
         starred: row?.starred !== false,
         tagCount: Array.isArray(row?.tags) ? row.tags.length : 1,
         shiny: row?.is_shiny !== false,
+        // Fail-safe : seul `count === 1` désigne un exemplaire unique ; un compteur absent, supérieur à 1
+        // ou inattendu est une « pile » dont la défausse (combien d'exemplaires partent ?) n'est pas garantie.
+        stack: row?.count !== 1,
         obtainedAt: String(row?.obtained_at || '')
       };
     }
@@ -86,6 +89,7 @@
         if (row.starred) card.reasons.add('starred');
         if (row.tagCount > 0) card.reasons.add('tagged');
         if (row.shiny) card.reasons.add('shiny');
+        if (row.stack) card.reasons.add('stack');
       }
 
       const counts = { total: cards.size, inRarity: 0, protectedBy: Object.fromEntries(PROTECTION_REASONS.map((r) => [r, 0])) };
@@ -142,7 +146,9 @@
             title: card.title,
             rarity: card.rarity,
             price: priced ? price : null,
-            unpriced: !priced
+            unpriced: !priced,
+            // Carte à exemplaire unique : défaussable par l'appel groupé (bulk-discard, par card_id).
+            bulk: card.copies.length === 1
           });
         }
       }
@@ -197,6 +203,24 @@
         keep: selected.filter((id) => stillEligible.has(id)),
         dropped: selected.filter((id) => !stillEligible.has(id))
       };
+    }
+
+    const BULK_URL = '/api/user-cards/bulk-discard';
+    const BULK_CHUNK = 25;
+
+    // Corps de l'appel groupé : des card_id, jamais d'exemplaire multiple.
+    function bulkBody(cardIds) {
+      const ids = [...new Set((cardIds || []).filter(isUuid))];
+      return ids.length ? { card_ids: ids } : null;
+    }
+
+    // Lecture stricte de la réponse { balance, discarded_count, failed }.
+    function parseBulkResult(json, sent) {
+      const count = Number(json?.discarded_count);
+      const failed = Array.isArray(json?.failed) ? json.failed : [];
+      const balance = Number(json?.balance);
+      const ok = Number.isInteger(count) && count === sent && failed.length === 0;
+      return { ok, discarded: Number.isInteger(count) ? count : 0, failed, balance: Number.isFinite(balance) ? balance : null };
     }
 
     function discardUrl(userCardId) {
@@ -266,7 +290,7 @@
 
     return {
       PRICE_TTL_MS, NO_PRICE_TTL_MS, normalizePriceStore, lookupPrice, rememberPrice, prunePriceStore,
-      RARITIES, DEFAULT_LIMIT, MAX_LIMIT, LIST_CAP, PROTECTION_REASONS,
+      RARITIES, DEFAULT_LIMIT, MAX_LIMIT, LIST_CAP, PROTECTION_REASONS, BULK_URL, BULK_CHUNK, bulkBody, parseBulkResult,
       validateParams, normalizeRow, classify, buildPlan, defaultSelection, nextSelection, queueSize, withoutRows, unpricedToAdd, reverify, discardUrl, familyCardIds
     };
   }

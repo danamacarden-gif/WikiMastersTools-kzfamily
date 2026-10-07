@@ -80,7 +80,7 @@ test('protections : favori, étiquette, shiny, famille, échange en cours', () =
     () => 1
   );
   assert.deepEqual(ids(plan), [H(6)]);
-  assert.deepEqual(plan.counts.protectedBy, { trade: 1, starred: 1, tagged: 1, shiny: 1, family: 1 });
+  assert.deepEqual(plan.counts.protectedBy, { trade: 1, starred: 1, tagged: 1, shiny: 1, family: 1, stack: 0 });
 });
 
 test('un échange en cours est reconnu par id d’exemplaire OU par id de carte', () => {
@@ -229,4 +229,32 @@ test('salves : nextSelection / queueSize / withoutRows', () => {
   assert.equal(L.queueSize({ eligible: items }, true), 5);
   assert.equal(L.queueSize(null, true), 0);
   assert.deepEqual(L.withoutRows([{ id: 'x' }, { id: 'y' }, null], new Set(['x'])), [{ id: 'y' }, null]);
+});
+
+test('piles : count absent ou > 1 = carte protégée (fail-safe) ; count 1 = défaussable', () => {
+  const L = require('../features/bulk-discard-logic.js').create();
+  const noCount = row(1); delete noCount.count;
+  const plan = L.buildPlan([row(2, { count: 3 }), noCount, row(3, { count: 'x' }), row(4)], ctx(), params(), priceMap({ [H(1)]: 1, [H(2)]: 1, [H(3)]: 1, [H(4)]: 1 }));
+  assert.deepEqual(ids(plan), [H(4)]);
+  assert.equal(plan.counts.protectedBy.stack, 3);
+});
+
+test('bulk : seules les cartes à exemplaire unique sont marquées ; doublons en lignes = appel unitaire', () => {
+  const L = require('../features/bulk-discard-logic.js').create();
+  const plan = L.buildPlan([row(1), row(2), row(2)], ctx(), params({ keepOne: true }), priceMap({ [H(1)]: 1, [H(2)]: 1 }));
+  assert.equal(plan.eligible.length, 1);
+  assert.equal(plan.eligible[0].cardId, H(2)); assert.equal(plan.eligible[0].bulk, false);
+  const single = L.buildPlan([row(1)], ctx(), params(), priceMap({ [H(1)]: 1 }));
+  assert.equal(single.eligible[0].bulk, true);
+});
+
+test('bulkBody / parseBulkResult : corps strict, réponse incohérente = refus', () => {
+  const L = require('../features/bulk-discard-logic.js').create();
+  assert.deepEqual(L.bulkBody([H(1), H(1), 'pas-un-uuid', H(2)]), { card_ids: [H(1), H(2)] });
+  assert.equal(L.bulkBody([]), null); assert.equal(L.bulkBody(['x']), null);
+  assert.deepEqual(L.parseBulkResult({ balance: 8425, discarded_count: 6, failed: [] }, 6), { ok: true, discarded: 6, failed: [], balance: 8425 });
+  assert.equal(L.parseBulkResult({ balance: 1, discarded_count: 5, failed: [] }, 6).ok, false);
+  assert.equal(L.parseBulkResult({ discarded_count: 6, failed: ['x'] }, 6).ok, false);
+  assert.equal(L.parseBulkResult({}, 6).ok, false);
+  assert.equal(L.parseBulkResult(null, 6).balance, null);
 });
