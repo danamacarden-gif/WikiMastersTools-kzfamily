@@ -55,11 +55,24 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 .wm-sales-stat strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
 .wm-sales-list { display: grid; gap: 12px; }
 .wm-sales-empty { padding: 28px 16px; border: 1px dashed var(--color-border, rgba(255,255,255,.18)); border-radius: 12px; text-align: center; font-size: 0.9rem; opacity: 0.75; }
-.wm-sales-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; padding: 12px; border: 1px solid var(--color-border, rgba(255,255,255,.12)); border-radius: 12px; background: var(--color-surface, #111114); }
+.wm-sales-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; padding: 12px; border: 1px solid var(--color-border, rgba(255,255,255,.12)); border-radius: 12px; background: var(--color-surface, #111114); }
 .wm-sales-row.has-bids { border-color: rgba(52, 211, 153, 0.45); }
 .wm-sales-row.is-new { box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.7); }
-.wm-sales-art { width: 96px; height: 134px; border-radius: 8px; background: rgba(255,255,255,.06); overflow: hidden; display: grid; place-items: center; font-size: 2rem; font-weight: 800; opacity: 0.9; }
-.wm-sales-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wm-sales-art { position: relative; width: 150px; height: 224px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 2px solid rgba(255,255,255,.18); background: #15191a; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.wm-sales-art[data-rarity="R"] { border-color: #60a5fa; }
+.wm-sales-art[data-rarity="SR"] { border-color: #c084fc; }
+.wm-sales-art[data-rarity="UR"] { border-color: #f472b6; }
+.wm-sales-art[data-rarity="L"] { border-color: #fbbf24; }
+.wm-sales-art[data-rarity="PC"] { border-color: #94a3b8; }
+.wm-sales-art.is-shiny { box-shadow: 0 0 0 1px #fde68a, 0 0 16px rgba(253,230,138,.45); }
+.wm-sales-card-pic { position: relative; flex: 0 0 96px; display: grid; place-items: center; background: rgba(255,255,255,.06); font-size: 2rem; font-weight: 800; overflow: hidden; }
+.wm-sales-card-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wm-sales-card-rarity { position: absolute; top: 6px; left: 6px; }
+.wm-sales-card-body { flex: 1; min-height: 0; padding: 6px 8px 2px; display: grid; gap: 2px; align-content: start; overflow: hidden; }
+.wm-sales-card-title { font-size: 12px; font-weight: 800; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.wm-sales-card-cat { font-size: 10px; color: #a8b3ae; }
+.wm-sales-card-sum { font-size: 10px; line-height: 1.3; color: #c4ccc8; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.wm-sales-card-stats { display: flex; justify-content: space-between; padding: 4px 8px 6px; font-size: 10px; font-weight: 800; color: #e2e8f0; }
 .wm-sales-main { min-width: 0; display: grid; gap: 10px; align-content: start; }
 .wm-sales-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .wm-sales-title a { color: inherit; font-weight: 700; font-size: 1.02rem; text-decoration: none; overflow-wrap: anywhere; }
@@ -76,7 +89,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 .wm-sales-bid.is-top { background: rgba(52, 211, 153, 0.12); }
 .wm-sales-bid .wm-sales-when { opacity: 0.6; }
 .wm-sales-nobid { font-size: 0.82rem; opacity: 0.65; }
-@media (max-width: 520px) { .wm-sales-row { grid-template-columns: 72px minmax(0, 1fr); } .wm-sales-art { width: 72px; height: 101px; } }
+@media (max-width: 520px) { .wm-sales-row { grid-template-columns: 104px minmax(0, 1fr); } .wm-sales-art { width: 104px; height: 156px; } .wm-sales-card-pic { flex-basis: 64px; } .wm-sales-card-sum { display: none; } }
 `;
 
       // ---- Données -----------------------------------------------------------------------------
@@ -187,13 +200,18 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         return el('strong', '', text);
       }
 
+      // Carte complète (cadre, rareté, visuel, titre, résumé, ATK/DEF), pas seulement l'illustration.
       function buildArt(sale) {
-        const art = el('div', 'wm-sales-art');
         const card = sale.card || {};
-        const url = card.hide_image ? null : card.image_url;
+        const rarityCode = sale.snapshot_rarity || card.rarity || '';
+        const art = el('div', 'wm-sales-art');
+        art.dataset.rarity = rarityCode;
+        if (sale.is_shiny || card.is_shiny) art.classList.add('is-shiny');
 
+        const picture = el('div', 'wm-sales-card-pic');
+        const url = card.hide_image ? null : card.image_url;
         const placeholder = () => {
-          art.replaceChildren(document.createTextNode((card.wikipedia_title || '?').trim().charAt(0).toUpperCase() || '?'));
+          picture.replaceChildren(document.createTextNode((card.wikipedia_title || '?').trim().charAt(0).toUpperCase() || '?'));
         };
 
         if (url) {
@@ -203,11 +221,27 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           img.referrerPolicy = 'no-referrer';
           img.addEventListener('error', placeholder);
           img.src = url;
-          art.append(img);
+          picture.append(img);
         } else {
           placeholder();
         }
 
+        const badge = kit.createRarityBadge(rarityCode);
+        if (badge) { badge.classList.add('wm-sales-card-rarity'); picture.append(badge); }
+
+        const body = el('div', 'wm-sales-card-body');
+        body.append(el('div', 'wm-sales-card-title', card.wikipedia_title || 'Carte'));
+        if (card.category) body.append(el('div', 'wm-sales-card-cat', card.category));
+        if (card.summary) body.append(el('div', 'wm-sales-card-sum', String(card.summary).replace(/\s+/g, ' ')));
+
+        const stats = el('div', 'wm-sales-card-stats');
+        const atk = Number(sale.snapshot_atk ?? card.atk);
+        const def = Number(sale.snapshot_def ?? card.def);
+        if (Number.isFinite(atk)) stats.append(el('span', '', `ATK ${atk}`));
+        if (Number.isFinite(def)) stats.append(el('span', '', `DEF ${def}`));
+
+        art.append(picture, body);
+        if (stats.childNodes.length) art.append(stats);
         return art;
       }
 
@@ -257,8 +291,6 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 
         const main = el('div', 'wm-sales-main');
         const title = el('div', 'wm-sales-title');
-        const rarity = kit.createRarityBadge(sale.snapshot_rarity || sale.card?.rarity);
-        if (rarity) title.append(rarity);
 
         const link = document.createElement('a');
         link.href = UUID.test(sale.id) ? `/marketplace/${sale.id}` : '#';

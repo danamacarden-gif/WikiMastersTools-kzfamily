@@ -49,6 +49,11 @@
       let marketState = createEmptyMarketState();
       // Cartes cochées dans la modale d'ajout (id -> carte), conservées d'une page de résultats à l'autre.
       let pickerSelection = new Map();
+      // Mes mises en cours (chargées depuis /api/marketplace?mine=1) : pour signaler les enchères
+      // déjà engagées sur les cartes manquantes et éviter de les rejouer sans le savoir.
+      const myBidState = { list: [], byAuction: new Map(), byCard: new Map(), sig: '', fetchedAt: 0, loading: false };
+      const MY_BIDS_TTL_MS = 30 * 1000;
+
       // Filtre du Marché des cartes manquantes : 'all' ou 'auctions' (enchères en cours).
       let marketFilter = 'all';
 
@@ -1793,6 +1798,37 @@
       // Synchro automatique à l'ouverture d'une famille liée : au plus une fois toutes les 6 h,
       // rafraîchit d'abord « mes cartes » (les cartes gagnées aux enchères apparaissent), puis
       // étiquette les exemplaires manquants. Silencieuse : un échec n'affiche rien.
+      async function refreshMyBids(force = false) {
+        if (myBidState.loading || (!force && Date.now() - myBidState.fetchedAt < MY_BIDS_TTL_MS)) return;
+        const userId = bidLogic.parseUserIdFromCookies(document.cookie);
+        if (!userId) return;
+
+        myBidState.loading = true;
+        try {
+          const json = await fetchJson('/api/marketplace?page=1&limit=1&mine=1', { method: 'GET', credentials: 'include' });
+          const list = familyLogic.extractMyBids(json, userId);
+          const sig = familyLogic.myBidsSignature(list);
+          myBidState.fetchedAt = Date.now();
+          if (sig !== myBidState.sig) {
+            myBidState.sig = sig;
+            myBidState.list = list;
+            myBidState.byAuction = new Map(list.map((b) => [b.auctionId, b]));
+            myBidState.byCard = new Map();
+            for (const b of list) {
+              if (!myBidState.byCard.has(b.cardId)) myBidState.byCard.set(b.cardId, []);
+              myBidState.byCard.get(b.cardId).push(b);
+            }
+            if (activeFamilyId && !document.querySelector('.wm-family-modal-overlay')) renderPageContent();
+          }
+        } catch (error) {
+          // Silencieux : sans cette info, l'interface reste celle d'avant.
+          console.debug('[WM Average] mes mises indisponibles', error);
+          myBidState.fetchedAt = Date.now();
+        } finally {
+          myBidState.loading = false;
+        }
+      }
+
       async function maybeAutoTagSync(family) {
         if (autoTagRunning || !family || !familyLogic.shouldAutoTagSync(family.tagSync, Date.now(), TAG_AUTO_INTERVAL_MS)) return;
         if (!bidLogic.parseUserIdFromCookies(document.cookie)) return;
@@ -2092,6 +2128,17 @@
           tags.append(price);
         }
 
+        const myBidsOnCard = myBidState.byCard.get(card.id);
+        if (card.owned === false && myBidsOnCard?.length) {
+          const mineTag = document.createElement('span');
+          mineTag.className = 'wm-family-mine-tag';
+          mineTag.dataset.role = 'mine-tag';
+          const leading = myBidsOnCard.some((b) => b.status === 'leading');
+          mineTag.textContent = leading ? '🔨 Tu mènes' : '🔨 Enchère en cours';
+          mineTag.title = 'Tu as déjà misé sur cette carte : ne la rejoue pas sans le savoir.';
+          tags.append(mineTag);
+        }
+
         slot.append(tags);
 
         if (!editing) {
@@ -2253,6 +2300,22 @@
         const badges = document.createElement('span');
         badges.className = 'wm-family-market-offer-badges';
 
+        // Enchère où l'utilisateur a déjà misé : mise en avant pour ne pas la rejouer sans le savoir.
+        const mine = myBidState.byAuction.get(auction.id);
+        if (mine && mine.status !== 'unknown') {
+          link.classList.add(mine.status === 'leading' ? 'is-mine-leading' : 'is-mine-outbid');
+          const flag = document.createElement('em');
+          flag.className = 'wm-family-mine-flag';
+          flag.textContent = mine.status === 'leading' ? 'Tu mènes' : 'Surenchéri';
+          badges.append(flag);
+        } else if (mine) {
+          link.classList.add('is-mine-unknown');
+          const flag = document.createElement('em');
+          flag.className = 'wm-family-mine-flag';
+          flag.textContent = 'Déjà misé';
+          badges.append(flag);
+        }
+
         if (auction?.is_shiny || auction?.card?.is_shiny) {
           const shiny = document.createElement('em');
           shiny.textContent = 'Shiny';
@@ -2293,6 +2356,14 @@
       }
 
       // Remplace une annonce dans les résultats du Marché (après une mise ou un rafraîchissement).
+      // Une enchère issue de « mes mises » peut ne pas figurer dans les résultats du marché : on l'y ajoute
+      // pour que la modale de mise (qui relit les annonces de la carte) puisse l'ouvrir.
+      function ensureMarketListing(familyIdValue, cardId, auction) {
+        const listings = marketCardState(cardId).listings || [];
+        if (listings.some((item) => item.id === auction.id)) return;
+        setMarketCardState(familyIdValue, cardId, { listings: [...listings, auction] });
+      }
+
       function replaceMarketListing(familyIdValue, cardId, auction) {
         const listings = marketCardState(cardId).listings || [];
         setMarketCardState(familyIdValue, cardId, {
@@ -2430,6 +2501,27 @@
   background: rgba(10, 14, 12, 0.84);
   color: #b7ffd7;
 }
+
+.wm-family-mine-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.6);
+  background: rgba(40, 28, 4, 0.9);
+  color: #fde68a;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.wm-family-market-offer.is-mine-leading { outline: 2px solid rgba(52, 211, 153, 0.75); outline-offset: -2px; }
+.wm-family-market-offer.is-mine-outbid { outline: 2px solid rgba(251, 146, 60, 0.85); outline-offset: -2px; }
+.wm-family-market-offer.is-mine-unknown { outline: 2px solid rgba(251, 191, 36, 0.7); outline-offset: -2px; }
+.wm-family-mine-flag { font-style: normal; font-weight: 800; color: #fde68a; }
+.is-mine-leading .wm-family-mine-flag { color: #6ee7b7; }
+.is-mine-outbid .wm-family-mine-flag { color: #fdba74; }
 
 .wm-family-price-tag.is-empty {
   border-color: rgba(209, 213, 219, 0.3);
@@ -3147,6 +3239,7 @@
 
               replaceMarketListing(family.id, card.id, auction);
               refreshBackground();
+              refreshMyBids(true);
 
               minimumOverride = null;
               touched = false;
@@ -3294,17 +3387,23 @@
             : `${missingCards.length} carte${missingCards.length > 1 ? 's' : ''} manquante${missingCards.length > 1 ? 's' : ''} • aucune requête lancée pour le moment`;
         }
 
+        const mineCards = missingCards.filter((card) => myBidState.byCard.has(card.id));
+        if (mineCards.length) {
+          summary.append(document.createTextNode(` • 🔨 ${mineCards.length} déjà en enchère de ta part`));
+        }
+
         panel.append(summary);
 
-        // Filtre disponible dès qu'une recherche a été lancée.
-        if (searchedCount > 0) {
+        // Filtre disponible dès qu'une recherche a été lancée (ou qu'une enchère à toi existe).
+        if (searchedCount > 0 || mineCards.length > 0) {
           const marketFilters = document.createElement('div');
           marketFilters.className = 'wm-family-filters wm-family-market-filters';
 
           for (const [key, text, count] of [
             ['all', 'Toutes', missingCards.length],
-            ['auctions', 'Enchères en cours', liveCount]
-          ]) {
+            ['auctions', 'Enchères en cours', liveCount],
+            ['mine', 'Mes enchères', mineCards.length]
+          ].filter(([key, , count]) => key !== 'mine' || count > 0 || marketFilter === 'mine')) {
             const filterButton = document.createElement('button');
             filterButton.type = 'button';
             filterButton.dataset.marketFilter = key;
@@ -3326,15 +3425,29 @@
         groups.className = 'wm-family-market-groups';
 
         // Filtre « Enchères en cours » : la fin la plus proche en premier (sinon ordre alphabétique).
-        const orderedCards = marketFilter === 'auctions'
+        // Les cartes où j'ai déjà une enchère passent en premier (et sont seules dans le filtre « Mes enchères »).
+        const hasMine = (card) => myBidState.byCard.has(card.id);
+        let orderedCards = marketFilter === 'auctions'
           ? familyLogic.sortByNextEnd(missingCards, (card) => marketCardState(card.id).listings, liveNow)
-          : missingCards;
+          : marketFilter === 'mine' ? missingCards.filter(hasMine) : missingCards;
+        orderedCards = [...orderedCards.filter(hasMine), ...orderedCards.filter((card) => !hasMine(card))];
 
         for (const card of orderedCards) {
           const state = marketCardState(card.id);
-          const offers = [...(marketFilter === 'auctions'
+          // Mes enchères sur cette carte, même si la recherche du marché ne les a pas (encore) remontées.
+          const mineOnCard = (myBidState.byCard.get(card.id) || []).map((b) => b.auction);
+          const baseListings = marketFilter === 'auctions'
             ? familyLogic.liveListings(state.listings, liveNow)
-            : (state.listings || []))].sort((a, b) => {
+            : (state.listings || []);
+          const known = new Set(baseListings.map((item) => item?.id));
+          const merged = marketFilter === 'mine'
+            ? mineOnCard
+            : [...baseListings, ...mineOnCard.filter((item) => !known.has(item.id))];
+          const offers = [...merged].sort((a, b) => {
+            const mineA = myBidState.byAuction.has(a?.id);
+            const mineB = myBidState.byAuction.has(b?.id);
+            if (mineA !== mineB) return mineA ? -1 : 1;
+
             const endA = Date.parse(a?.end_at || '');
             const endB = Date.parse(b?.end_at || '');
             const validA = Number.isFinite(endA);
@@ -3431,7 +3544,7 @@
 
             const visibleOffers = offers.slice(0, 4);
             for (const offer of visibleOffers) {
-              offerList.append(createMarketplaceOffer(offer, () => openBidModal(family.id, card.id, offer.id)));
+              offerList.append(createMarketplaceOffer(offer, () => { ensureMarketListing(family.id, card.id, offer); openBidModal(family.id, card.id, offer.id); }));
             }
 
             if (offers.length > visibleOffers.length) {
@@ -3444,7 +3557,7 @@
 
               const extra = document.createElement('div');
               for (const offer of offers.slice(visibleOffers.length)) {
-                extra.append(createMarketplaceOffer(offer, () => openBidModal(family.id, card.id, offer.id)));
+                extra.append(createMarketplaceOffer(offer, () => { ensureMarketListing(family.id, card.id, offer); openBidModal(family.id, card.id, offer.id); }));
               }
 
               details.append(summaryMore, extra);
@@ -4358,7 +4471,10 @@
         if (activeFamilyId && !family) activeFamilyId = null;
 
         content.replaceChildren(family ? buildDetail(family) : buildHome());
-        if (family) maybeAutoTagSync(family);
+        if (family) {
+          maybeAutoTagSync(family);
+          refreshMyBids();
+        }
       }
 
       function ensurePage() {

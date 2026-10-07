@@ -22,8 +22,6 @@
     'familyLogic',
     'themeTracker',
     'uiKit',
-    'listAuctionLogic',
-    'listAuction',
     'autoBidLogic',
     'myBidsLogic',
     'myBids',
@@ -107,8 +105,6 @@
 
   runtime.modalUi = featureRegistry.modalUi.create();
   runtime.uiKit = featureRegistry.uiKit.create();
-  runtime.listAuctionLogic = featureRegistry.listAuctionLogic.create();
-  runtime.listAuction = featureRegistry.listAuction.create(runtime);
   runtime.packs = featureRegistry.packs.create(runtime);
   runtime.ranking = featureRegistry.ranking.create(runtime);
   runtime.collectionBulk = featureRegistry.collectionBulk.create(runtime);

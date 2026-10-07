@@ -160,6 +160,26 @@
       return (items || []).filter((item) => !item.unpriced).slice(0, Math.max(0, limit)).map((item) => item.userCardId);
     }
 
+    // Sélection d'une salve : les cartes avec prix d'abord, puis (si demandé) celles sans prix, dans la limite du lot.
+    function nextSelection(items, limit, includeUnpriced) {
+      const max = Math.max(0, limit);
+      const list = Array.isArray(items) ? items : [];
+      const ordered = [...list.filter((item) => !item.unpriced), ...(includeUnpriced ? list.filter((item) => item.unpriced) : [])];
+      return ordered.slice(0, max).map((item) => item.userCardId);
+    }
+
+    // Exemplaires restant à traiter (file d'attente) : avec prix, plus sans prix si l'utilisateur les inclut.
+    function queueSize(plan, includeUnpriced) {
+      const eligible = Array.isArray(plan?.eligible) ? plan.eligible : [];
+      return eligible.filter((item) => includeUnpriced || !item.unpriced).length;
+    }
+
+    // Collection relue moins les exemplaires déjà défaussés : base de la salve suivante, sans nouvelle analyse.
+    function withoutRows(rows, doneIds) {
+      const done = doneIds instanceof Set ? doneIds : new Set(doneIds || []);
+      return (Array.isArray(rows) ? rows : []).filter((row) => !done.has(row?.id));
+    }
+
     // Cartes sans prix qu'on peut cocher en plus sans dépasser le lot, vu la sélection actuelle.
     function unpricedToAdd(items, selected, limit) {
       const chosen = selected instanceof Set ? selected : new Set(selected || []);
@@ -247,7 +267,7 @@
     return {
       PRICE_TTL_MS, NO_PRICE_TTL_MS, normalizePriceStore, lookupPrice, rememberPrice, prunePriceStore,
       RARITIES, DEFAULT_LIMIT, MAX_LIMIT, LIST_CAP, PROTECTION_REASONS,
-      validateParams, normalizeRow, classify, buildPlan, defaultSelection, unpricedToAdd, reverify, discardUrl, familyCardIds
+      validateParams, normalizeRow, classify, buildPlan, defaultSelection, nextSelection, queueSize, withoutRows, unpricedToAdd, reverify, discardUrl, familyCardIds
     };
   }
 

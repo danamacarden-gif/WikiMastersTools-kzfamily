@@ -359,3 +359,16 @@ test('shouldAutoTagSync : actif, étiquette choisie, au plus une fois par 6 h', 
   assert.equal(logic.shouldAutoTagSync({ auto: true, tagId: TU(1), lastAutoAt: now - 7 * H }, now), true);
   assert.equal(logic.shouldAutoTagSync({ auto: true, tagId: TU(1), lastAutoAt: now + H }, now), true);
 });
+
+test('extractMyBids : statut, enchères terminées écartées, doublons, identité inconnue', () => {
+  const F = require('../features/family-logic.js').create();
+  const now = Date.parse('2026-10-07T12:00:00Z');
+  const A = (o) => ({ id: 'a', card_id: 'c', status: 'active', current_bidder_id: 'me', end_at: '2026-10-07T13:00:00Z', ...o });
+  const json = { bidding: [A({}), A({ id: 'b', current_bidder_id: 'other' }), A({ id: 'c2', end_at: '2026-10-07T11:00:00Z' }),
+    A({ id: 'd', status: 'ended' }), A({}), A({ id: 'e', card_id: undefined }), A({ id: 'f', current_bidder_id: null })] };
+  const r = F.extractMyBids(json, 'me', now);
+  assert.deepEqual(r.map((x) => [x.auctionId, x.status]), [['a', 'leading'], ['b', 'outbid'], ['f', 'unknown']]);
+  assert.equal(F.extractMyBids(json, null, now)[0].status, 'unknown');
+  assert.deepEqual(F.extractMyBids({}, 'me', now), []);
+  assert.equal(F.myBidsSignature(r), F.myBidsSignature([...r].reverse()));
+});

@@ -129,14 +129,3 @@ test('Mes ventes : câblé dans bootstrap, manifest, content (avant bulkDiscard)
   }
   assert.ok(read('features/app.js').indexOf('runtime.mySales.render()') < read('features/app.js').indexOf('runtime.bulkDiscard.render()'));
 });
-
-test('récap → enchère : listAuction créé après uiKit et avant packs, et câblé partout', () => {
-  const content = read('content.js');
-  const at = (n) => content.indexOf(`runtime.${n} = featureRegistry.${n}.create`);
-  assert.ok(at('uiKit') >= 0 && at('uiKit') < at('listAuction') && at('listAuctionLogic') < at('listAuction') && at('listAuction') < at('packs'));
-  const paths = bootstrapPaths(); const manifest = read('manifest.json');
-  for (const f of ['features/list-auction-logic.js', 'features/list-auction.js']) {
-    assert.ok(paths.includes(f), `${f} absent de bootstrap`); assert.ok(manifest.includes(`"${f}"`), `${f} absent du manifest`);
-  }
-  assert.match(content, /'listAuctionLogic',\s*'listAuction'/);
-});

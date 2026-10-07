@@ -225,8 +225,41 @@
       return `${baseUrl}wishlist_items?select=card_id&user_id=eq.${userId}&order=card_id.asc&limit=${limit}&offset=${offset}`;
     }
 
+    // Enchères en cours sur lesquelles l'utilisateur a déjà misé (`bidding` de /api/marketplace?mine=1).
+    // status : 'leading' (il mène), 'outbid' (surenchéri) ou 'unknown' (identité indisponible).
+    function extractMyBids(json, userId, now = Date.now()) {
+      if (!Array.isArray(json?.bidding)) return [];
+      const result = [];
+      const seen = new Set();
+
+      for (const auction of json.bidding) {
+        const id = auction?.id;
+        const cardId = auction?.card_id || auction?.card?.id;
+        if (!id || !cardId || seen.has(id)) continue;
+        if (auction.status && auction.status !== 'active') continue;
+        const end = Date.parse(auction.end_at);
+        if (Number.isFinite(end) && end <= now) continue;
+        seen.add(id);
+
+        const bidder = auction.current_bidder_id;
+        result.push({
+          auctionId: id,
+          cardId,
+          status: !userId || !bidder ? 'unknown' : bidder === userId ? 'leading' : 'outbid',
+          auction
+        });
+      }
+
+      return result;
+    }
+
+    // Empreinte compacte : sert à ne re-rendre l'interface que si quelque chose a changé.
+    function myBidsSignature(list) {
+      return (Array.isArray(list) ? list : []).map((b) => `${b.auctionId}:${b.status}:${b.auction?.current_bid ?? ''}`).sort().join('|');
+    }
+
     return {
-      planTagSync, tagInsertBody, shouldAutoTagSync,
+      extractMyBids, myBidsSignature, planTagSync, tagInsertBody, shouldAutoTagSync,
       planWishlistSync, chunk, wishlistDeleteUrl, wishlistInsertBody, wishlistReadUrl,
       RARITIES, nextEndTime, sortByNextEnd, pickAddable, mergeCards, auctionBidInfo, isLiveAuction, liveListings,
       validateBid, filterCards, rarityCounts
