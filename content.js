@@ -25,6 +25,8 @@
     'autoBidLogic',
     'myBidsLogic',
     'myBids',
+    'mySalesLogic',
+    'mySales',
     'bulkDiscardLogic',
     'bulkDiscard',
     'app'
@@ -112,6 +114,8 @@
   runtime.myBidsLogic = featureRegistry.myBidsLogic.create();
   runtime.themeTracker = featureRegistry.themeTracker.create(runtime);
   runtime.myBids = featureRegistry.myBids.create(runtime);
+  runtime.mySalesLogic = featureRegistry.mySalesLogic.create();
+  runtime.mySales = featureRegistry.mySales.create(runtime);
   runtime.bulkDiscardLogic = featureRegistry.bulkDiscardLogic.create();
   runtime.bulkDiscard = featureRegistry.bulkDiscard.create(runtime);
   runtime.app = featureRegistry.app.create(runtime);

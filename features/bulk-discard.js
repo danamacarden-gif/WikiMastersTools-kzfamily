@@ -544,6 +544,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 
         if (!link) {
           const anchor =
+            document.getElementById('wm-my-sales-nav') ||
             document.getElementById('wm-my-bids-nav') ||
             document.querySelector('nav a[href="/marketplace"]') ||
             document.querySelector('nav a[href="/collection"]');
