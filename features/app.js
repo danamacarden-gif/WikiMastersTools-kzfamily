@@ -13,6 +13,7 @@
         runtime.settings.ensureButton();
         runtime.themeTracker.render();
         runtime.myBids.render();
+        runtime.bulkDiscard.render();
 
         if (isCollectionPage()) {
           runtime.collectionBulk.ensureToolbar();
