@@ -12,6 +12,8 @@
       const SETTING_KEY = 'bulkDiscard';
       const FAMILIES_KEY = 'wm_families_v1';
 
+      // Une défausse rapporte 1 W par carte.
+      const GAIN_PER_DISCARD = 1;
       const MAX_COLLECTION_PAGES = 800;
       const PAGE_DELAY_MS = 120;
       const DISCARD_DELAY_MS = 600;
@@ -393,6 +395,9 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           list.append(row);
         }
         wrap.append(list);
+        const total = el('p', 'wm-discard-hint', '');
+        total.dataset.role = 'discard-gain-preview';
+        wrap.append(total);
 
         if (context.familyCount === 0) {
           const ack = el('label', 'wm-discard-check');
@@ -419,6 +424,8 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         if (!go) return;
         const n = state.selected.size;
         go.textContent = n ? `Défausser ${plural(n, 'carte', 'cartes')}…` : 'Défausser…';
+        const gain = document.querySelector(`#${PAGE_ID} [data-role="discard-gain-preview"]`);
+        if (gain) gain.textContent = `Gain estimé : +${fmt(n * GAIN_PER_DISCARD)} W (${fmt(GAIN_PER_DISCARD)} W par carte défaussée).`;
         go.disabled = n === 0 || (state.context.familyCount === 0 && !state.ack);
       }
 
@@ -427,7 +434,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         const wrap = el('div', 'wm-discard-panel');
         wrap.dataset.role = 'discard-confirm';
         wrap.append(
-          el('div', 'wm-discard-warning', `Tu es sur le point de défausser définitivement ${plural(n, 'exemplaire', 'exemplaires')}. Cette action est irréversible. Avant d’agir, ta collection est relue et tout ce qui est devenu favori, étiqueté, dans une famille ou dans un échange est retiré de la liste.`)
+          el('div', 'wm-discard-warning', `Tu es sur le point de défausser définitivement ${plural(n, 'exemplaire', 'exemplaires')}. Tu recevras ${fmt(n * GAIN_PER_DISCARD)} W (${fmt(GAIN_PER_DISCARD)} W par carte). Cette action est irréversible. Avant d’agir, ta collection est relue et tout ce qui est devenu favori, étiqueté, dans une famille ou dans un échange est retiré de la liste.`)
         );
         const actions = el('div', 'wm-discard-actions');
         actions.append(
@@ -455,6 +462,9 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         const wrap = el('div', 'wm-discard-panel');
         wrap.dataset.role = 'discard-done';
         wrap.append(el('p', 'wm-discard-note', `${plural(run.done, 'carte défaussée', 'cartes défaussées')} sur ${fmt(run.total)} prévue${run.total > 1 ? 's' : ''}.`));
+        const gain = el('p', 'wm-discard-note', `Gain : +${fmt(run.done * GAIN_PER_DISCARD)} W (${fmt(GAIN_PER_DISCARD)} W par carte).`);
+        gain.dataset.role = 'discard-gain';
+        wrap.append(gain);
         if (run.dropped) wrap.append(el('p', 'wm-discard-note', `${plural(run.dropped, 'carte a été retirée', 'cartes ont été retirées')} de la liste : elles ont changé depuis l’analyse (favori, étiquette, famille, échange…).`));
         if (run.stopped) wrap.append(el('p', 'wm-discard-note', 'Arrêté à ta demande.'));
         if (run.error) {
