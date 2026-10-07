@@ -128,6 +128,8 @@ test('Mes ventes : câblé dans bootstrap, manifest, content (avant bulkDiscard)
     assert.ok(manifest.includes(`"${file}"`), `${file} absent du manifest`);
   }
   assert.ok(read('features/app.js').indexOf('runtime.mySales.render()') < read('features/app.js').indexOf('runtime.bulkDiscard.render()'));
+});
+
 test('récap → enchère : listAuction créé après uiKit et avant packs, et câblé partout', () => {
   const content = read('content.js');
   const at = (n) => content.indexOf(`runtime.${n} = featureRegistry.${n}.create`);
