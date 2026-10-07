@@ -179,12 +179,54 @@
       return ids.length ? ids.map((cardId) => ({ user_id: userId, card_id: cardId })) : null;
     }
 
+    // ---- Étiquettes (table user_card_tags) ---------------------------------------------
+    // Une étiquette est posée sur un EXEMPLAIRE possédé (user_card_id), pas sur la carte :
+    // seules les cartes possédées peuvent être étiquetées. Chaque exemplaire d'une carte
+    // possédée en plusieurs copies reçoit l'étiquette.
+    function planTagSync(cards, taggedUserCardIds) {
+      const tagged = taggedUserCardIds instanceof Set ? taggedUserCardIds : new Set(taggedUserCardIds || []);
+      const plan = { toAdd: [], alreadyTagged: 0, notOwned: 0, unchecked: 0, needsReload: 0 };
+      const seen = new Set();
+
+      for (const card of Array.isArray(cards) ? cards : []) {
+        if (!card || !isUuid(card.id) || seen.has(card.id)) continue;
+        seen.add(card.id);
+
+        if (card.owned == null) { plan.unchecked += 1; continue; }
+        if (card.owned === false) { plan.notOwned += 1; continue; }
+
+        const ids = [...new Set((Array.isArray(card.ownedCardIds) ? card.ownedCardIds : []).filter(isUuid))];
+        if (!ids.length) { plan.needsReload += 1; continue; }
+
+        for (const userCardId of ids) {
+          if (tagged.has(userCardId)) plan.alreadyTagged += 1;
+          else plan.toAdd.push({ userCardId, cardId: card.id, title: card.title || '' });
+        }
+      }
+
+      return plan;
+    }
+
+    function tagInsertBody(tagId, userCardIds) {
+      if (!isUuid(tagId)) return null;
+      const ids = [...new Set((userCardIds || []).filter(isUuid))];
+      return ids.length ? ids.map((userCardId) => ({ user_card_id: userCardId, tag_id: tagId })) : null;
+    }
+
+    // Synchro automatique : seulement si activée, étiquette choisie et pas déjà faite récemment.
+    function shouldAutoTagSync(tagSync, now = Date.now(), minIntervalMs = 6 * 3600 * 1000) {
+      if (!tagSync || tagSync.auto !== true || !isUuid(tagSync.tagId)) return false;
+      const last = Number(tagSync.lastAutoAt);
+      return !Number.isFinite(last) || last <= 0 || now - last >= minIntervalMs || now < last;
+    }
+
     function wishlistReadUrl(baseUrl, userId, offset = 0, limit = 1000) {
       if (!isUuid(userId)) return null;
       return `${baseUrl}wishlist_items?select=card_id&user_id=eq.${userId}&order=card_id.asc&limit=${limit}&offset=${offset}`;
     }
 
     return {
+      planTagSync, tagInsertBody, shouldAutoTagSync,
       planWishlistSync, chunk, wishlistDeleteUrl, wishlistInsertBody, wishlistReadUrl,
       RARITIES, nextEndTime, sortByNextEnd, pickAddable, mergeCards, auctionBidInfo, isLiveAuction, liveListings,
       validateBid, filterCards, rarityCounts
