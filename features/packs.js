@@ -751,7 +751,7 @@
         }
 
         const signature = JSON.stringify(activePackRecap.cards.map((card) => [
-          card.id, card.rarity, cacheMemory.get(card.id), runtime.listAuction?.isListed(card.id) ? 1 : 0
+          card.id, card.rarity, cacheMemory.get(card.id)
         ]));
         if (existing?.dataset.signature === signature) return;
         const panel = existing || document.createElement('aside');
@@ -826,33 +826,6 @@
 
           row.append(rarity, name, value);
 
-          // Clic sur une carte : ouvre la modale de mise aux enchères.
-          if (runtime.listAuction && card.id) {
-            const isListed = runtime.listAuction.isListed(card.id);
-            row.classList.add(isListed ? 'wm-la-listed' : 'wm-la-clickable');
-            row.title = isListed ? 'Déjà mise aux enchères' : 'Mettre cette carte aux enchères';
-            if (isListed) {
-              const tag = document.createElement('span');
-              tag.className = 'wm-la-tag';
-              tag.textContent = 'en vente';
-              name.append(tag);
-            } else {
-              row.tabIndex = 0;
-              row.setAttribute('role', 'button');
-              const average = cacheEntry ? chooseAverage(cacheEntry, null, card.rarity || null) : null;
-              const openModal = () => runtime.listAuction.open({
-                cardId: card.id,
-                title: card.title,
-                rarity: card.rarity || null,
-                average: Number.isFinite(average) ? average : null
-              });
-              row.addEventListener('click', openModal);
-              row.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openModal(); }
-              });
-            }
-          }
-
           list.append(row);
         }
 
@@ -873,12 +846,6 @@
           document.body.append(panel);
         }
       }
-
-      runtime.listAuction?.onChange(() => {
-        const panel = document.getElementById('wm-pack-recap');
-        if (panel) delete panel.dataset.signature;
-        renderPackRecap();
-      });
 
       function handlePackOpened(cards) {
         if (!Array.isArray(cards) || !cards.length) return;

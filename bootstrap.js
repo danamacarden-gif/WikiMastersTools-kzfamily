@@ -180,8 +180,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       'features/compact-mode.js',
       'features/trades.js',
       'features/modal-ui.js',
-      'features/list-auction-logic.js',
-      'features/list-auction.js',
       'features/packs.js',
       'features/ranking.js',
       'features/collection-bulk.js',
