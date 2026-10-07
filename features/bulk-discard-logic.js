@@ -6,6 +6,8 @@
   const RARITIES = ['C', 'PC', 'R', 'SR', 'UR', 'L'];
   const DEFAULT_LIMIT = 50;
   const MAX_LIMIT = 200;
+  // Au-delà, la liste affichée est tronquée (le reste est compté, jamais défaussé).
+  const LIST_CAP = 1500;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   // Raisons de protection, par ordre de priorité d'affichage.
@@ -108,27 +110,27 @@
       return { candidates, counts };
     }
 
-    // Plan complet. `priceOf(cardId, rarity)` renvoie la valeur de marché moyenne, ou null si
-    // elle est inconnue : une carte sans prix n'est JAMAIS défaussée.
+    // Plan complet. `priceOf(cardId, rarity)` renvoie la valeur de marché moyenne, ou null si elle est
+    // inconnue. Les cartes sans prix sont LISTÉES (`unpriced: true`, `price: null`) mais ne sont jamais
+    // sélectionnées d'office : seul un choix explicite de l'utilisateur les inclut.
     function buildPlan(rows, context, params, priceOf) {
       const { candidates, counts } = classify(rows, { ...context, rarities: params.rarities });
       const plan = {
         counts: { ...counts, unpriced: 0, aboveMax: 0, keptOne: 0 },
         eligible: [],
         items: [],
-        overLimit: 0
+        overList: 0
       };
 
       for (const card of candidates) {
         const price = priceOf(card.cardId, card.rarity);
-        if (!(typeof price === 'number' && Number.isFinite(price) && price >= 0)) {
-          plan.counts.unpriced += 1;
-          continue;
-        }
-        if (price > params.maxPrice) {
+        const priced = typeof price === 'number' && Number.isFinite(price) && price >= 0;
+
+        if (priced && price > params.maxPrice) {
           plan.counts.aboveMax += 1;
           continue;
         }
+        if (!priced) plan.counts.unpriced += 1;
 
         const toDiscard = params.keepOne ? card.copies.slice(1) : card.copies;
         if (params.keepOne) plan.counts.keptOne += 1;
@@ -139,15 +141,30 @@
             cardId: card.cardId,
             title: card.title,
             rarity: card.rarity,
-            price
+            price: priced ? price : null,
+            unpriced: !priced
           });
         }
       }
 
-      plan.eligible.sort((a, b) => a.title.localeCompare(b.title, 'fr') || a.userCardId.localeCompare(b.userCardId));
-      plan.items = plan.eligible.slice(0, params.limit);
-      plan.overLimit = plan.eligible.length - plan.items.length;
+      // Les cartes avec prix d'abord, puis celles sans prix ; alphabétique dans chaque groupe.
+      plan.eligible.sort((a, b) => Number(a.unpriced) - Number(b.unpriced)
+        || a.title.localeCompare(b.title, 'fr') || a.userCardId.localeCompare(b.userCardId));
+      plan.items = plan.eligible.slice(0, LIST_CAP);
+      plan.overList = plan.eligible.length - plan.items.length;
       return plan;
+    }
+
+    // Sélection initiale : les cartes avec prix, dans la limite du lot. Jamais une carte sans prix.
+    function defaultSelection(items, limit) {
+      return (items || []).filter((item) => !item.unpriced).slice(0, Math.max(0, limit)).map((item) => item.userCardId);
+    }
+
+    // Cartes sans prix qu'on peut cocher en plus sans dépasser le lot, vu la sélection actuelle.
+    function unpricedToAdd(items, selected, limit) {
+      const chosen = selected instanceof Set ? selected : new Set(selected || []);
+      const room = Math.max(0, limit - chosen.size);
+      return (items || []).filter((item) => item.unpriced && !chosen.has(item.userCardId)).slice(0, room).map((item) => item.userCardId);
     }
 
     // Avant d'exécuter : on ne garde que ce qui est encore éligible dans un plan recalculé à
@@ -229,8 +246,8 @@
 
     return {
       PRICE_TTL_MS, NO_PRICE_TTL_MS, normalizePriceStore, lookupPrice, rememberPrice, prunePriceStore,
-      RARITIES, DEFAULT_LIMIT, MAX_LIMIT, PROTECTION_REASONS,
-      validateParams, normalizeRow, classify, buildPlan, reverify, discardUrl, familyCardIds
+      RARITIES, DEFAULT_LIMIT, MAX_LIMIT, LIST_CAP, PROTECTION_REASONS,
+      validateParams, normalizeRow, classify, buildPlan, defaultSelection, unpricedToAdd, reverify, discardUrl, familyCardIds
     };
   }
 

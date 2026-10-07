@@ -36,13 +36,34 @@ test('buildPlan : ne retient que la rareté choisie sous le prix max (inclus)', 
   assert.equal(plan.counts.aboveMax, 1);
 });
 
-test('une carte sans prix connu n’est jamais défaussée', () => {
+test('une carte sans prix est listée (price null, unpriced) mais jamais sélectionnée d’office', () => {
   const plan = logic.buildPlan([row(1), row(2)], ctx(), params(), priceMap({ [H(1)]: 1 }));
-  assert.deepEqual(ids(plan), [H(1)]);
+  assert.deepEqual(plan.items.map((x) => [x.cardId, x.price, x.unpriced]), [[H(1), 1, false], [H(2), null, true]]);
   assert.equal(plan.counts.unpriced, 1);
+  assert.deepEqual(logic.defaultSelection(plan.items, 50), [plan.items[0].userCardId]);
   for (const bad of [NaN, undefined, 'x', -1, Infinity]) {
-    assert.equal(logic.buildPlan([row(9)], ctx(), params(), () => bad).eligible.length, 0, String(bad));
+    const p = logic.buildPlan([row(9)], ctx(), params(), () => bad);
+    assert.equal(p.items.length, 1, String(bad));
+    assert.equal(p.items[0].unpriced, true, String(bad));
+    assert.deepEqual(logic.defaultSelection(p.items, 50), [], String(bad));
   }
+});
+
+test('les cartes sans prix suivent celles avec prix dans la liste', () => {
+  const rows = [row(1, { card: { id: H(1), wikipedia_title: 'Zèbre', rarity: 'C' } }), row(2, { card: { id: H(2), wikipedia_title: 'Abeille', rarity: 'C' } })];
+  const plan = logic.buildPlan(rows, ctx(), params(), priceMap({ [H(1)]: 1 }));
+  assert.deepEqual(plan.items.map((x) => x.title), ['Zèbre', 'Abeille']);
+});
+
+test('unpricedToAdd : coche les sans-prix dans la limite du lot, sans doublon', () => {
+  const rows = [row(1), row(2), row(3), row(4)];
+  const plan = logic.buildPlan(rows, ctx(), params(), priceMap({ [H(1)]: 1 }));
+  const selected = new Set(logic.defaultSelection(plan.items, 3));
+  assert.equal(selected.size, 1);
+  assert.equal(logic.unpricedToAdd(plan.items, selected, 3).length, 2, 'reste 2 places sur 3');
+  assert.equal(logic.unpricedToAdd(plan.items, selected, 1).length, 0, 'lot plein');
+  assert.equal(logic.unpricedToAdd(plan.items, selected, 10).length, 3);
+  assert.deepEqual(logic.unpricedToAdd(null, null, 5), []);
 });
 
 test('protections : favori, étiquette, shiny, famille, échange en cours', () => {
@@ -99,12 +120,21 @@ test('keepOne : garde l’exemplaire le plus ancien et ne défausse que les doub
   assert.equal(all.eligible.length, 4);
 });
 
-test('plafond de lot : items limités, le reste est compté', () => {
+test('liste complète ; la sélection initiale est plafonnée par le lot', () => {
   const rows = Array.from({ length: 7 }, (_, i) => row(i + 1));
   const plan = logic.buildPlan(rows, ctx(), params({ limit: 3 }), () => 1);
   assert.equal(plan.eligible.length, 7);
-  assert.equal(plan.items.length, 3);
-  assert.equal(plan.overLimit, 4);
+  assert.equal(plan.items.length, 7);
+  assert.equal(plan.overList, 0);
+  assert.equal(logic.defaultSelection(plan.items, 3).length, 3);
+  assert.equal(logic.defaultSelection(plan.items, 0).length, 0);
+});
+
+test('liste tronquée au-delà de LIST_CAP, le reste est compté', () => {
+  const rows = Array.from({ length: logic.LIST_CAP + 5 }, (_, i) => row(i + 1));
+  const plan = logic.buildPlan(rows, ctx(), params(), () => 1);
+  assert.equal(plan.items.length, logic.LIST_CAP);
+  assert.equal(plan.overList, 5);
 });
 
 test('lignes invalides ou en double ignorées, entrées vides tolérées', () => {
