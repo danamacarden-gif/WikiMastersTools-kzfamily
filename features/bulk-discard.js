@@ -322,7 +322,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           for (let i = 0; i < bulkIds.length && !state.run.error; i += logic.BULK_CHUNK) {
             if (state.run.stop) { state.run.stopped = true; break; }
             const chunk = bulkIds.slice(i, i + logic.BULK_CHUNK);
-            const body = logic.bulkBody(chunk.map((id) => byId.get(id).cardId));
+            const body = logic.bulkBody(chunk);
             if (!body) continue;
             setProgress(`Défausse… ${fmt(state.run.done)} / ${fmt(keep.length)}`, state.run.done / Math.max(1, keep.length));
 

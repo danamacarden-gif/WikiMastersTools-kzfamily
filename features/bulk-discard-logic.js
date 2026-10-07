@@ -147,8 +147,9 @@
             rarity: card.rarity,
             price: priced ? price : null,
             unpriced: !priced,
-            // Carte à exemplaire unique : défaussable par l'appel groupé (bulk-discard, par card_id).
-            bulk: card.copies.length === 1
+            // L'appel groupé (bulk-discard) prend l'identifiant de l'EXEMPLAIRE (`id` de la ligne) : le site
+            // répond card_not_owned pour un card_id. Les piles (count != 1) sont déjà protégées en amont.
+            bulk: true
           });
         }
       }
@@ -208,9 +209,9 @@
     const BULK_URL = '/api/user-cards/bulk-discard';
     const BULK_CHUNK = 25;
 
-    // Corps de l'appel groupé : des card_id, jamais d'exemplaire multiple.
-    function bulkBody(cardIds) {
-      const ids = [...new Set((cardIds || []).filter(isUuid))];
+    // Corps de l'appel groupé : { card_ids: [...] } — en réalité des identifiants d'exemplaires.
+    function bulkBody(userCardIds) {
+      const ids = [...new Set((userCardIds || []).filter(isUuid))];
       return ids.length ? { card_ids: ids } : null;
     }
 

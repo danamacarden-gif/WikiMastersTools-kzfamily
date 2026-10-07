@@ -239,13 +239,14 @@ test('piles : count absent ou > 1 = carte protégée (fail-safe) ; count 1 = dé
   assert.equal(plan.counts.protectedBy.stack, 3);
 });
 
-test('bulk : seules les cartes à exemplaire unique sont marquées ; doublons en lignes = appel unitaire', () => {
+test('bulk : tous les exemplaires éligibles (lignes séparées) passent par l\'appel groupé, par id d\'exemplaire', () => {
   const L = require('../features/bulk-discard-logic.js').create();
-  const plan = L.buildPlan([row(1), row(2), row(2)], ctx(), params({ keepOne: true }), priceMap({ [H(1)]: 1, [H(2)]: 1 }));
+  const rows = [row(1), row(2), row(2)];
+  const plan = L.buildPlan(rows, ctx(), params({ keepOne: true }), priceMap({ [H(1)]: 1, [H(2)]: 1 }));
   assert.equal(plan.eligible.length, 1);
-  assert.equal(plan.eligible[0].cardId, H(2)); assert.equal(plan.eligible[0].bulk, false);
-  const single = L.buildPlan([row(1)], ctx(), params(), priceMap({ [H(1)]: 1 }));
-  assert.equal(single.eligible[0].bulk, true);
+  assert.equal(plan.eligible[0].bulk, true);
+  assert.equal(plan.eligible[0].userCardId, rows[2].id, 'on envoie l\'id de la ligne (exemplaire), pas le card_id');
+  assert.notEqual(plan.eligible[0].userCardId, plan.eligible[0].cardId);
 });
 
 test('bulkBody / parseBulkResult : corps strict, réponse incohérente = refus', () => {
