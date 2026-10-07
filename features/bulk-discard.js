@@ -16,7 +16,8 @@
       // Une défausse rapporte 1 W par carte.
       const GAIN_PER_DISCARD = 1;
       const MAX_COLLECTION_PAGES = 800;
-      const PAGE_DELAY_MS = 120;
+      const PAGE_DELAY_MS = 100;
+      const READ_CONCURRENCY = 3;
       const DISCARD_DELAY_MS = 600;
       const BULK_DELAY_MS = 500;
       // Collection lue depuis moins de 5 min : on ne la relit pas avant d'agir (la sélection vient d'être validée à l'écran).
@@ -104,34 +105,78 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         return body;
       }
 
-      // Relit TOUTE la collection depuis le site. Au moindre échec on abandonne : jamais de plan
-      // construit sur une lecture partielle.
-      async function loadCollection(onProgress) {
+      // Lecture d'UNE rareté (filtre `rarity=` du site) : la page 0 d'abord (taille de page), puis des
+      // vagues de pages en parallèle. Au moindre échec on abandonne : jamais de plan sur une lecture partielle.
+      async function readRarity(rarity, onCount) {
         const rows = [];
         const pending = new Set();
         const seen = new Set();
         let firstSize = 0;
+        let done = false;
 
-        for (let page = 0; page < MAX_COLLECTION_PAGES; page += 1) {
-          const json = await fetchJson(`/api/my-collection?sort=rarity&page=${page}&stats=0`);
+        const absorb = (json) => {
           const list = Array.isArray(json?.collection) ? json.collection : null;
           if (!list) throw new Error('Réponse inattendue du site pour la collection.');
           for (const id of Array.isArray(json?.pendingTradeCardIds) ? json.pendingTradeCardIds : []) pending.add(id);
-
-          if (page === 0) firstSize = list.length;
           for (const row of list) {
             if (row?.id && !seen.has(row.id)) {
               seen.add(row.id);
               rows.push(row);
             }
           }
-          onProgress?.(`Lecture de ta collection… ${fmt(rows.length)} exemplaires`);
-          if (!list.length || list.length < firstSize) break;
-          if (page === MAX_COLLECTION_PAGES - 1) throw new Error('Collection trop volumineuse pour être relue en entier.');
-          await wait(PAGE_DELAY_MS);
+          onCount?.(rows.length);
+          return list.length;
+        };
+        const url = (page) => `/api/my-collection?sort=rarity&rarity=${encodeURIComponent(rarity)}&page=${page}&stats=0`;
+
+        firstSize = absorb(await fetchJson(url(0)));
+        if (firstSize === 0) done = true;
+
+        for (let page = 1; !done && page < MAX_COLLECTION_PAGES; page += READ_CONCURRENCY) {
+          const pages = Array.from({ length: Math.min(READ_CONCURRENCY, MAX_COLLECTION_PAGES - page) }, (_, i) => page + i);
+          const jsons = await Promise.all(pages.map((p) => fetchJson(url(p))));
+          for (const json of jsons) {
+            const size = absorb(json);
+            if (size === 0 || size < firstSize) done = true;
+          }
+          if (!done) await wait(PAGE_DELAY_MS);
+          if (!done && page + READ_CONCURRENCY >= MAX_COLLECTION_PAGES) throw new Error('Collection trop volumineuse pour être relue en entier.');
         }
 
         return { rows, pending };
+      }
+
+      // Lecture des raretés demandées, avec cache de 5 min par rareté : changer les critères ou lancer
+      // une salve ne relit rien de ce qui est déjà frais. `force` (Actualiser) relit tout.
+      const readCache = new Map(); // rareté -> { rows, pending, at }
+
+      async function loadCollection(rarities, onProgress, force = false) {
+        const rows = [];
+        const pending = new Set();
+        const seen = new Set();
+        let oldest = Date.now();
+        let loaded = 0;
+
+        for (const rarity of rarities) {
+          let entry = readCache.get(rarity);
+          if (force || !entry || Date.now() - entry.at >= FRESH_READ_MS) {
+            const base = loaded;
+            const fresh = await readRarity(rarity, (n) => onProgress?.(`Lecture de ta collection (${rarity})… ${fmt(base + n)} exemplaires`));
+            entry = { ...fresh, at: Date.now() };
+            readCache.set(rarity, entry);
+          }
+          oldest = Math.min(oldest, entry.at);
+          for (const row of entry.rows) {
+            if (!seen.has(row.id)) {
+              seen.add(row.id);
+              rows.push(row);
+            }
+          }
+          for (const id of entry.pending) pending.add(id);
+          loaded = rows.length;
+        }
+
+        return { rows, pending, at: oldest };
       }
 
       function readFamilyContext() {
@@ -215,14 +260,14 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         render();
 
         try {
-          const { rows, pending } = await loadCollection((text) => setProgress(text));
+          const { rows, pending, at } = await loadCollection(state.params.rarities, (text) => setProgress(text), refresh === true);
           const family = readFamilyContext();
           const context = { familyCardIds: family.familyCardIds, pendingIds: pending };
           const { candidates } = logic.classify(rows, { ...context, rarities: state.params.rarities });
           await ensurePrices(candidates, (text, ratio) => setProgress(text, ratio), refresh === true);
 
           state.context = { ...context, familyCount: family.familyCount, rows };
-          state.rowsAt = Date.now();
+          state.rowsAt = at;
           state.plan = logic.buildPlan(rows, context, state.params, priceOf);
           state.includeUnpriced = false;
           state.freshRows = null;
@@ -253,8 +298,9 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
             ? { rows: logic.withoutRows(state.freshRows, state.doneIds), pending: state.freshContext.pendingIds, at: state.freshAt }
             : state.context?.rows ? { rows: logic.withoutRows(state.context.rows, state.doneIds), pending: state.context.pendingIds, at: state.rowsAt } : null;
           const useCache = reuse && Date.now() - (reuse.at || 0) < FRESH_READ_MS;
-          const { rows, pending } = useCache ? reuse : await loadCollection((text) => setProgress(text));
-          const readAt = useCache ? reuse.at : Date.now();
+          const loaded = useCache ? reuse : await loadCollection(state.params.rarities, (text) => setProgress(text), true);
+          const { rows, pending } = loaded;
+          const readAt = useCache ? reuse.at : loaded.at;
           const family = readFamilyContext();
           const context = { familyCardIds: family.familyCardIds, pendingIds: pending };
           const fresh = logic.buildPlan(rows, context, { ...state.params, limit: Number.MAX_SAFE_INTEGER }, priceOf);
@@ -461,7 +507,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 
         const lines = el('div', 'wm-discard-lines');
         lines.append(
-          line('Exemplaires lus dans ta collection', context.rows.length),
+          line('Exemplaires lus (raretés choisies)', context.rows.length),
           line(`Familles prises en compte (${fmt(context.familyCardIds.size)} cartes protégées)`, context.familyCount, 'families'),
           line('Cartes de cette rareté protégées : favori', plan.counts.protectedBy.starred),
           line('… étiquetées', plan.counts.protectedBy.tagged),
@@ -611,6 +657,10 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         wrap.append(
           el('div', 'wm-discard-warning', `Tu es sur le point de défausser définitivement ${plural(n, 'exemplaire', 'exemplaires')}. Tu recevras ${fmt(n * GAIN_PER_DISCARD)} W (${fmt(GAIN_PER_DISCARD)} W par carte). Cette action est irréversible. Avant d’agir, ta collection est relue et tout ce qui est devenu favori, étiqueté, dans une famille ou dans un échange est retiré de la liste.`)
         );
+        const rareSelected = state.plan.items.filter((item) => state.selected.has(item.userCardId) && ['L', 'UR', 'SR'].includes(item.rarity)).length;
+        if (rareSelected) {
+          wrap.append(el('div', 'wm-discard-warning', `Attention : ${plural(rareSelected, 'carte rare (L / UR / SR)', 'cartes rares (L / UR / SR)')} dans la sélection.`));
+        }
         const readAt = state.freshRows ? state.freshAt : state.rowsAt;
         const ageMin = readAt ? Math.floor((Date.now() - readAt) / 60000) : null;
         if (ageMin != null) {
