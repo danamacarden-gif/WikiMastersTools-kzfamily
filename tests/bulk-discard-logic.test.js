@@ -214,3 +214,19 @@ test('priceStore : prune retire les périmés puis les plus anciens au-delà du 
   logic.prunePriceStore(store, now, 2);
   assert.deepEqual(Object.keys(store).sort(), [H(3), H(4)].sort());
 });
+
+test('salves : nextSelection / queueSize / withoutRows', () => {
+  const L = require('../features/bulk-discard-logic.js').create();
+  const items = [
+    { userCardId: 'a', unpriced: false }, { userCardId: 'b', unpriced: false }, { userCardId: 'c', unpriced: false },
+    { userCardId: 'u1', unpriced: true }, { userCardId: 'u2', unpriced: true }
+  ];
+  assert.deepEqual(L.nextSelection(items, 2, false), ['a', 'b']);
+  assert.deepEqual(L.nextSelection(items, 4, false), ['a', 'b', 'c']);
+  assert.deepEqual(L.nextSelection(items, 4, true), ['a', 'b', 'c', 'u1']);
+  assert.deepEqual(L.nextSelection(items, 0, true), []);
+  assert.equal(L.queueSize({ eligible: items }, false), 3);
+  assert.equal(L.queueSize({ eligible: items }, true), 5);
+  assert.equal(L.queueSize(null, true), 0);
+  assert.deepEqual(L.withoutRows([{ id: 'x' }, { id: 'y' }, null], new Set(['x'])), [{ id: 'y' }, null]);
+});

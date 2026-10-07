@@ -40,6 +40,9 @@
         context: null,
         selected: new Set(),
         ack: false,
+        includeUnpriced: false,
+        doneIds: new Set(),
+        nextPlan: null,
         progress: '',
         priceStats: { remembered: 0, fetched: 0 },
         run: { done: 0, total: 0, stop: false, dropped: 0, error: '', stopped: false },
@@ -217,9 +220,11 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 
           state.context = { ...context, familyCount: family.familyCount, rows };
           state.plan = logic.buildPlan(rows, context, state.params, priceOf);
-          state.selected = new Set(logic.defaultSelection(state.plan.items, state.params.limit));
+          state.includeUnpriced = false;
+          state.doneIds = new Set();
+          state.nextPlan = null;
+          state.selected = new Set(logic.nextSelection(state.plan.items, state.params.limit, false));
           state.ack = false;
-          state.baseLimit = null;
           state.view = 'preview';
         } catch (error) {
           state.view = 'error';
@@ -246,6 +251,8 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           state.run.dropped = dropped.length;
           state.run.total = keep.length;
           const byId = new Map(fresh.eligible.map((item) => [item.userCardId, item]));
+          state.freshRows = rows;
+          state.freshContext = context;
 
           for (const id of keep) {
             if (state.run.stop) {
@@ -259,6 +266,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
             try {
               await fetchJson(url, { method: 'POST' });
               state.run.done += 1;
+              state.doneIds.add(id);
             } catch (error) {
               state.run.error = error.status === 401 || error.status === 403
                 ? 'Session expirée ou refusée : recharge la page wiki-masters puis réessaie.'
@@ -436,24 +444,18 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           master.dataset.role = 'include-unpriced';
           master.addEventListener('change', () => {
             if (master.checked) {
-              // « Tout cocher » est un choix explicite : la case coche TOUS les exemplaires sans prix
-              // et relève le lot en conséquence (affiché dans le compteur, confirmation renforcée).
-              for (const item of unpricedItems) state.selected.add(item.userCardId);
-              if (state.selected.size > state.params.limit) {
-                if (state.baseLimit == null) state.baseLimit = state.params.limit;
-                state.params.limit = state.selected.size;
-              }
+              // Les sans-prix entrent dans la file d'attente (après les cartes avec prix) : cette salve
+              // s'en remplit dans la limite du lot, les suivantes prendront le reste.
+              state.includeUnpriced = true;
+              for (const id of logic.unpricedToAdd(plan.items, state.selected, state.params.limit)) state.selected.add(id);
             } else {
+              state.includeUnpriced = false;
               for (const item of unpricedItems) state.selected.delete(item.userCardId);
-              if (state.baseLimit != null && state.selected.size <= state.baseLimit) {
-                state.params.limit = state.baseLimit;
-                state.baseLimit = null;
-              }
             }
             syncRowBoxes();
             refreshFooter();
           });
-          masterLabel.append(master, el('span', '', `Défausser aussi les ${plural(unpricedItems.length, 'exemplaire sans prix connu', 'exemplaires sans prix connu')} (valeur inconnue : à tes risques ; le lot est relevé si besoin)`));
+          masterLabel.append(master, el('span', '', `Défausser aussi les ${plural(unpricedItems.length, 'exemplaire sans prix connu', 'exemplaires sans prix connu')} (valeur inconnue : à tes risques ; elles passent après les cartes avec prix, salve par salve)`));
           wrap.append(masterLabel);
         }
 
@@ -524,7 +526,9 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         const unpricedSelected = state.plan.items.filter((item) => item.unpriced && state.selected.has(item.userCardId)).length;
         const info = document.querySelector(`#${PAGE_ID} [data-role="selection-info"]`);
         if (info) {
-          info.textContent = `Sélection : ${fmt(n)} / ${fmt(limit)} (lot maximum${state.baseLimit != null ? `, relevé depuis ${fmt(state.baseLimit)}` : ''})${unpricedSelected ? `, dont ${fmt(unpricedSelected)} sans prix connu` : ''}.${n > limit ? ' Trop de cartes : décoche-en ou augmente le lot dans les critères.' : ''}`;
+          const queue = logic.queueSize(state.plan, state.includeUnpriced);
+          const rest = Math.max(0, queue - n);
+          info.textContent = `Sélection : ${fmt(n)} / ${fmt(limit)} (lot de cette salve)${rest ? `, ${fmt(rest)} à traiter ensuite par salves` : ''}${unpricedSelected ? `, dont ${fmt(unpricedSelected)} sans prix connu` : ''}.${n > limit ? ' Trop de cartes : décoche-en ou augmente le lot dans les critères.' : ''}`;
           info.dataset.kind = n > limit ? 'error' : '';
         }
 
@@ -532,8 +536,10 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         if (master) {
           const all = state.plan.items.filter((item) => item.unpriced);
           const picked = all.filter((item) => state.selected.has(item.userCardId)).length;
-          master.checked = all.length > 0 && picked === all.length;
-          master.indeterminate = picked > 0 && picked < all.length;
+          // La case traduit un choix (inclure les sans-prix dans la file), pas un nombre de lignes cochées.
+          master.checked = state.includeUnpriced;
+          master.indeterminate = false;
+          void picked;
         }
 
         go.disabled = n === 0 || n > limit || (state.context.familyCount === 0 && !state.ack);
@@ -550,21 +556,8 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         if (unpricedSelected) {
           wrap.append(el('div', 'wm-discard-warning', `Dont ${plural(unpricedSelected, 'carte sans prix connu', 'cartes sans prix connu')} : leur valeur est inconnue, tu peux défausser une carte qui vaut cher.`));
         }
-        // Gros lot : il faut retaper le nombre exact pour confirmer.
-        const BIG = logic.MAX_LIMIT;
-        let typed = null;
-        if (n > BIG) {
-          wrap.append(el('div', 'wm-discard-warning', `Gros lot (plus de ${fmt(BIG)} cartes) : tape ${fmt(n)} pour confirmer.`));
-          typed = document.createElement('input');
-          typed.type = 'text';
-          typed.inputMode = 'numeric';
-          typed.className = 'wm-discard-input';
-          typed.dataset.role = 'confirm-count';
-          wrap.append(typed);
-        }
         const actions = el('div', 'wm-discard-actions');
-        const runButton = button(`Oui, défausser ${plural(n, 'carte', 'cartes')}`, 'is-danger', execute, typed != null, 'confirm-run');
-        if (typed) typed.addEventListener('input', () => { runButton.disabled = typed.value.replace(/\D/g, '') !== String(n); });
+        const runButton = button(`Oui, défausser ${plural(n, 'carte', 'cartes')}`, 'is-danger', execute, false, 'confirm-run');
         actions.append(
           runButton,
           button('Annuler', '', () => { state.view = 'preview'; render(); }, false, 'cancel-confirm')
@@ -603,7 +596,25 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           wrap.firstChild.dataset.kind = 'success';
         }
         const actions = el('div', 'wm-discard-actions');
-        actions.append(button('Nouvelle analyse', 'is-primary', () => { state.view = 'form'; render(); }, false, 'again'));
+
+        // Salve suivante : on repart de la collection relue moins ce qui vient d'être défaussé,
+        // sans refaire l'analyse ni recharger de prix. Une confirmation reste demandée.
+        let nextPlan = null;
+        if (!run.error && state.freshRows) {
+          nextPlan = logic.buildPlan(logic.withoutRows(state.freshRows, state.doneIds), state.freshContext, state.params, priceOf);
+        }
+        const queue = nextPlan ? logic.queueSize(nextPlan, state.includeUnpriced) : 0;
+        if (queue > 0) {
+          const size = Math.min(queue, state.params.limit);
+          wrap.append(el('p', 'wm-discard-note', `Il reste ${plural(queue, 'exemplaire à défausser', 'exemplaires à défausser')} avec les mêmes critères.`));
+          actions.append(button(`Lot suivant (${fmt(size)})`, 'is-primary', () => {
+            state.plan = nextPlan;
+            state.selected = new Set(logic.nextSelection(nextPlan.items, state.params.limit, state.includeUnpriced));
+            state.view = 'preview';
+            render();
+          }, false, 'next-batch'));
+        }
+        actions.append(button('Nouvelle analyse', queue > 0 ? '' : 'is-primary', () => { state.view = 'form'; render(); }, false, 'again'));
         wrap.append(actions);
         return wrap;
       }
