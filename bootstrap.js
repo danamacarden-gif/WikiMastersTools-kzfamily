@@ -190,6 +190,8 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       'features/auto-bid-logic.js',
       'features/my-bids-logic.js',
       'features/my-bids.js',
+      'features/bulk-discard-logic.js',
+      'features/bulk-discard.js',
       'features/app.js',
       'content.js'
     ];

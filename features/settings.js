@@ -21,6 +21,7 @@
         rankingSales: true,
         themeTracker: true,
         myBids: true,
+        bulkDiscard: true,
         compactMode: true,
         packRecap: true,
         pullStats: true,
@@ -68,6 +69,13 @@
           description: 'Outils pour suivre tes enchères.',
           items: [
             ['myBids', 'Afficher la page Mes enchères', 'Ajoute Mes enchères au menu latéral avec suivi des enchères, surenchère en un clic et alerte sonore sous 1 minute. Désactive cette option pour masquer entièrement la page et son entrée dans le menu.']
+          ]
+        },
+        {
+          title: 'Collection',
+          description: 'Outils de gestion de ta collection.',
+          items: [
+            ['bulkDiscard', 'Afficher la page Défausser en masse', 'Ajoute Défausser au menu latéral : défausse en une fois les cartes d’une rareté sous une valeur de marché donnée, hors favoris, étiquettes, familles et échanges en cours. Action irréversible, avec aperçu et confirmation.']
           ]
         },
         {

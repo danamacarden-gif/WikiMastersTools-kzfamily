@@ -101,3 +101,16 @@ test('auto-enchère : uiKit, autoBidLogic et myBidsLogic sont créés avant myBi
     assert.ok(manifestResources().has(file), `${file} absent du manifest`);
   }
 });
+
+test('bulkDiscardLogic est chargé, exigé et créé avant bulkDiscard', () => {
+  const paths = bootstrapPaths();
+  assert.ok(paths.indexOf('features/bulk-discard-logic.js') >= 0, 'bulk-discard-logic.js absent de bootstrap.js');
+  assert.ok(paths.indexOf('features/bulk-discard-logic.js') < paths.indexOf('features/bulk-discard.js'));
+
+  const content = read('content.js');
+  assert.ok(content.indexOf("'bulkDiscardLogic'") >= 0 && content.indexOf("'bulkDiscard'") > content.indexOf("'bulkDiscardLogic'"));
+  const logic = content.indexOf('runtime.bulkDiscardLogic = featureRegistry.bulkDiscardLogic.create()');
+  const page = content.indexOf('runtime.bulkDiscard = featureRegistry.bulkDiscard.create');
+  assert.ok(logic >= 0 && logic < page, 'bulkDiscardLogic doit être créé avant bulkDiscard');
+  assert.ok(read('features/app.js').includes('runtime.bulkDiscard.render()'), 'app.js doit rendre la page de défausse');
+});
