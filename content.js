@@ -29,6 +29,10 @@
     'mySales',
     'bulkDiscardLogic',
     'bulkDiscard',
+    'sellIdeasLogic',
+    'listAuctionLogic',
+    'listAuction',
+    'sellIdeas',
     'app'
   ];
 
@@ -118,6 +122,10 @@
   runtime.mySales = featureRegistry.mySales.create(runtime);
   runtime.bulkDiscardLogic = featureRegistry.bulkDiscardLogic.create();
   runtime.bulkDiscard = featureRegistry.bulkDiscard.create(runtime);
+  runtime.sellIdeasLogic = featureRegistry.sellIdeasLogic.create(runtime.bulkDiscardLogic);
+  runtime.listAuctionLogic = featureRegistry.listAuctionLogic.create();
+  runtime.listAuction = featureRegistry.listAuction.create(runtime);
+  runtime.sellIdeas = featureRegistry.sellIdeas.create(runtime);
   runtime.app = featureRegistry.app.create(runtime);
 
   runtime.app.startObserver();

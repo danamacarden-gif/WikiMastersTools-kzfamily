@@ -194,6 +194,10 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       'features/my-sales.js',
       'features/bulk-discard-logic.js',
       'features/bulk-discard.js',
+      'features/sell-ideas-logic.js',
+      'features/sell-ideas.js',
+      'features/list-auction-logic.js',
+      'features/list-auction.js',
       'features/app.js',
       'content.js'
     ];
