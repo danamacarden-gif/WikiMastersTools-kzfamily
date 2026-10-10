@@ -48,6 +48,43 @@
       }
     }
 
+    function friendlyError(result) {
+      if (result.alreadyListed) return 'Toutes tes copies de cette carte sont déjà en vente.';
+      if (result.notOwned || result.ownershipError) return 'Tu ne possèdes plus cette carte.';
+      return String(result.error || 'Erreur inconnue');
+    }
+
+    // Pont de l'extension (bridge/marketplace.js) : événement de création, résultat porté par le même requestId.
+    function requestListing(card, body, allowStarred, setMsg) {
+      return new Promise((resolve) => {
+        const requestId = `sell:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        const finish = (detail) => {
+          window.removeEventListener('wm-average-create-listing-result', onResult);
+          window.removeEventListener('wm-average-create-listing-progress', onProgress);
+          clearTimeout(timer);
+          resolve(detail);
+        };
+        const onResult = (event) => { if (event.detail?.requestId === requestId) finish(event.detail); };
+        const onProgress = (event) => {
+          if (event.detail?.requestId === requestId) setMsg('Recherche de ton exemplaire…');
+        };
+        const timer = setTimeout(() => finish({ ok: false, error: 'Le site n’a pas répondu (délai dépassé).' }), 30000);
+        window.addEventListener('wm-average-create-listing-result', onResult);
+        window.addEventListener('wm-average-create-listing-progress', onProgress);
+        window.dispatchEvent(new CustomEvent('wm-average-create-listing', {
+          detail: {
+            requestId,
+            ownedCardId: card.ownedCardId || null,
+            catalogueCardId: card.cardId,
+            title: card.title,
+            baseAmount: body.base_amount,
+            durationMinutes: body.duration_minutes,
+            allowStarred
+          }
+        }));
+      });
+    }
+
     function close() {
       document.getElementById(OVERLAY_ID)?.remove();
       document.removeEventListener('keydown', onKey, true);
@@ -65,7 +102,7 @@
       listeners.add(callback);
     }
 
-    // card : { cardId, title, rarity, average }
+    // card : { cardId (carte du catalogue), ownedCardId (exemplaire, facultatif), title, rarity, average }
     function open(card) {
       if (!card?.cardId || document.getElementById(OVERLAY_ID)) return;
       runtime.uiKit?.injectStyles?.('wm-list-auction-styles', CSS);
@@ -126,23 +163,21 @@
 
         busy = true; go.disabled = true; cancel.disabled = true; setMsg('Création de l’enchère…');
         try {
-          const response = await fetch('/api/marketplace', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { accept: '*/*', 'content-type': 'application/json' },
-            body: JSON.stringify(built.body)
-          });
-          let json = null;
-          try { json = await response.json(); } catch (_) { /* corps vide */ }
-          if (!response.ok) {
-            throw new Error(String(json?.error || json?.message || `HTTP ${response.status}`));
+          // Le site attend l'identifiant de l'EXEMPLAIRE possédé, pas celui de la carte : on passe par le pont
+          // de l'extension, qui retrouve un exemplaire disponible (ni déjà en vente, favori en dernier recours).
+          let result = await requestListing(card, built.body, false, setMsg);
+          if (result.needsStarredConfirmation) {
+            const ok = window.confirm('Ton seul exemplaire disponible est en favori. Le mettre quand même aux enchères ?');
+            if (!ok) throw new Error('Vente annulée (exemplaire en favori).');
+            result = await requestListing(card, built.body, true, setMsg);
           }
+          if (!result.ok) throw new Error(friendlyError(result));
 
           state.sent = true;
           listed.add(card.cardId);
           for (const cb of listeners) { try { cb(); } catch (_) { /* ignoré */ } }
           setMsg(`Enchère lancée : ${built.body.base_amount} W de départ.`, 'ok');
-          const id = logic.createdId(json);
+          const id = logic.createdId(result.listing);
           actions.replaceChildren();
           if (id) {
             const link = el('a', 'wm-la-go', 'Voir la vente');
