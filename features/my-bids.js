@@ -10,6 +10,7 @@
 
       const SOUND_KEY = 'wm_my_bids_sound_v1';
       const AUTO_KEY = 'wm_auto_bids_v1';
+      const DISMISSED_KEY = 'wm_bids_dismissed_v1';
       // Dans les 45 dernières secondes d'une enchère armée, on relit la liste toutes les 1,5 s.
       const FAST_WINDOW_MS = 45 * 1000;
       const FAST_REFRESH_MS = 1500;
@@ -41,6 +42,8 @@
         autoDrafts: new Map(),
         autoOpen: new Set(),
         autoNotes: new Map(),
+        // Enchères retirées de la liste par l'utilisateur : id -> date (masquage local uniquement).
+        dismissed: logic.normalizeDismissed(readLocalValue(DISMISSED_KEY)),
         lastAttempt: new Map(),
         // Écart horloge serveur - horloge locale (ms), estimé via l'en-tête Date de l'API.
         skewMs: 0
@@ -209,9 +212,48 @@
   cursor: pointer;
 }
 
+.wm-bids-actions {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.wm-bids-remove,
+.wm-bids-restore {
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.72rem;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.wm-bids-remove:hover,
+.wm-bids-restore:hover {
+  opacity: 1;
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+.wm-bids-restore {
+  justify-self: center;
+}
+
 @media (max-width: 640px) {
   .wm-bids-row {
     grid-template-columns: 42px minmax(0, 1fr) 96px;
+  }
+
+  .wm-bids-actions {
+    grid-column: 3;
+    grid-row: 1 / span 3;
+  }
+
+  .wm-bids-actions .wm-bids-bid {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 `;
@@ -338,7 +380,7 @@
 
       function checkAlerts() {
         if (state.soundOn && !audioRunning()) return;
-        const fresh = alerts.collect(state.bids, serverNow());
+        const fresh = alerts.collect(logic.visibleBids(state.bids, state.dismissed), serverNow());
         if (fresh.length && state.soundOn) playUrgentBeep();
       }
 
@@ -402,6 +444,11 @@
           }
           state.userId = logic.parseUserIdFromCookies(document.cookie);
           forgetFinishedAutoBids(ids);
+          const pruned = logic.pruneDismissed(state.dismissed, ids);
+          if (Object.keys(pruned).length !== Object.keys(state.dismissed).length) {
+            state.dismissed = pruned;
+            writeLocalValue(DISMISSED_KEY, state.dismissed);
+          }
           state.error = null;
           state.loaded = true;
           state.updatedAt = Date.now();
@@ -561,7 +608,7 @@
         const now = serverNow();
         let needFast = false;
 
-        for (const bid of state.bids) {
+        for (const bid of logic.visibleBids(state.bids, state.dismissed)) {
           const config = state.autoBids[bid.id];
           if (!config?.armed) continue;
 
@@ -844,6 +891,25 @@
         return block;
       }
 
+      function dismissBid(auctionId) {
+        const bid = state.bids.find((item) => item.id === auctionId);
+        if (!bid) return;
+        const leading = logic.bidStatus(bid, state.userId) === 'leading' && logic.remainingMs(bid, serverNow()) > 0;
+        if (leading && !window.confirm('Tu es en tête sur cette enchère. Ta mise reste valable sur le site : si personne ne surenchérit, tu remporteras la carte et le montant sera débité. Retirer seulement l’enchère de cette liste ?')) return;
+
+        removeAutoConfig(auctionId);
+        state.rowErrors.delete(auctionId);
+        state.dismissed = { ...state.dismissed, [auctionId]: Date.now() };
+        writeLocalValue(DISMISSED_KEY, state.dismissed);
+        renderAll();
+      }
+
+      function restoreDismissed() {
+        state.dismissed = {};
+        writeLocalValue(DISMISSED_KEY, state.dismissed);
+        renderAll();
+      }
+
       function buildRow(bid) {
         const now = serverNow();
         const remaining = logic.remainingMs(bid, now);
@@ -887,7 +953,18 @@
         button.setAttribute('aria-label', `Miser ${formatAmount(nextAmount)} sur ${bid.card?.wikipedia_title || 'cette carte'}`);
         button.addEventListener('click', () => placeBid(bid.id));
 
-        row.append(info, price, countdown, button);
+        // « Retirer » : masque l'enchère de la liste et désarme l'auto-enchère. Le site ne permet pas
+        // d'annuler une mise : si tu mènes, ta mise reste valable.
+        const remove = el('button', 'wm-bids-remove', 'Retirer');
+        remove.type = 'button';
+        remove.dataset.role = 'dismiss';
+        remove.title = 'Retire cette enchère de la liste et désarme l’auto-enchère. N’annule pas une mise déjà placée.';
+        remove.setAttribute('aria-label', `Retirer ${bid.card?.wikipedia_title || 'cette enchère'} de ma liste`);
+        remove.addEventListener('click', () => dismissBid(bid.id));
+
+        const actions = el('div', 'wm-bids-actions');
+        actions.append(button, remove);
+        row.append(info, price, countdown, actions);
         row.append(buildAutoBlock(bid, remaining));
 
         const note = state.autoNotes.get(bid.id);
@@ -910,7 +987,7 @@
         let list = content.querySelector('[data-role="list"]');
         if (!list) return;
 
-        const sorted = logic.sortBids(state.bids, serverNow());
+        const sorted = logic.sortBids(logic.visibleBids(state.bids, state.dismissed), serverNow());
 
         // Une ligne dont un champ a le focus n'est pas reconstruite : sinon l'actualisation
         // (toutes les 1,5 s en fin d'enchère) ferait perdre la saisie.
@@ -933,6 +1010,13 @@
 
         const empty = content.querySelector('[data-role="empty"]');
         if (empty) empty.hidden = !(state.loaded && !state.error && !sorted.length);
+
+        const hiddenCount = logic.visibleBids(state.bids, {}).length - sorted.length;
+        const restore = content.querySelector('[data-role="dismissed"]');
+        if (restore) {
+          restore.hidden = hiddenCount <= 0;
+          restore.textContent = `${hiddenCount} enchère${hiddenCount > 1 ? 's' : ''} retirée${hiddenCount > 1 ? 's' : ''} de la liste — réafficher`;
+        }
       }
 
       function renderAll() {
@@ -950,7 +1034,13 @@
         empty.dataset.role = 'empty';
         empty.hidden = true;
 
-        fragment.append(buildHeader(), list, empty);
+        const restore = el('button', 'wm-bids-restore', '');
+        restore.type = 'button';
+        restore.dataset.role = 'dismissed';
+        restore.hidden = true;
+        restore.addEventListener('click', restoreDismissed);
+
+        fragment.append(buildHeader(), list, empty, restore);
         return fragment;
       }
 
