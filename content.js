@@ -122,7 +122,7 @@
   runtime.mySales = featureRegistry.mySales.create(runtime);
   runtime.bulkDiscardLogic = featureRegistry.bulkDiscardLogic.create();
   runtime.bulkDiscard = featureRegistry.bulkDiscard.create(runtime);
-  runtime.sellIdeasLogic = featureRegistry.sellIdeasLogic.create(runtime.bulkDiscardLogic);
+  runtime.sellIdeasLogic = featureRegistry.sellIdeasLogic.create();
   runtime.listAuctionLogic = featureRegistry.listAuctionLogic.create();
   runtime.listAuction = featureRegistry.listAuction.create(runtime);
   runtime.sellIdeas = featureRegistry.sellIdeas.create(runtime);

@@ -133,9 +133,8 @@ test('Mes ventes : câblé dans bootstrap, manifest, content (avant bulkDiscard)
 test('À vendre : câblé (logique, modale, page) dans bootstrap, manifest, content, app et réglages', () => {
   const content = read('content.js');
   const at = (n) => content.indexOf(`runtime.${n} = featureRegistry.${n}.create`);
-  assert.ok(at('bulkDiscardLogic') < at('sellIdeasLogic') && at('sellIdeasLogic') < at('sellIdeas'));
+  assert.ok(at('bulkDiscard') < at('sellIdeas') && at('sellIdeasLogic') < at('sellIdeas'));
   assert.ok(at('listAuctionLogic') < at('listAuction') && at('listAuction') < at('sellIdeas'));
-  assert.ok(content.includes('create(runtime.bulkDiscardLogic)'));
   assert.match(content, /'sellIdeasLogic',\s*'listAuctionLogic',\s*'listAuction',\s*'sellIdeas'/);
   const manifest = read('manifest.json');
   const paths = bootstrapPaths();
