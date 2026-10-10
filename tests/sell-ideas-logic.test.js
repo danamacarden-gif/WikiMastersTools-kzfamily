@@ -86,3 +86,10 @@ test('les cartes déjà en vente passent en dernier', () => {
   const out = logic.select(rows, { duplicatesOnly: true }, new Set(['cCbest']));
   assert.equal(out.items.at(-1).id, 'cCbest');
 });
+
+test('ownedCardId : premier exemplaire, null si favori', () => {
+  const rows = logic.buildRows([
+    card(1, 'R', { ownedCardIds: ['x1', 'x2'] }), card(2, 'R', { ownedCardIds: ['y1'], starred: true }), card(3, 'R')
+  ], () => 5);
+  assert.deepEqual(rows.map((r) => r.ownedCardId), ['x1', null, null]);
+});

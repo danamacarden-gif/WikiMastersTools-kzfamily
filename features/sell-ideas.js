@@ -408,7 +408,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 
         if (item.listed || runtime.listAuction.isListed(item.id)) row.append(el('span', 'wm-sell-tag', 'En vente'));
         else row.append(button('Vendre…', 'is-small', () => runtime.listAuction.open({
-          cardId: item.id, title: item.title, rarity: item.rarity, average: item.price
+          cardId: item.id, ownedCardId: item.ownedCardId, title: item.title, rarity: item.rarity, average: item.price
         })));
         return row;
       }
