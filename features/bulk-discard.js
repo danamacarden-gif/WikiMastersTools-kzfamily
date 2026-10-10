@@ -903,7 +903,12 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         ensurePage();
       }
 
-      return { render: renderEntry, isDiscardPage };
+      return {
+        render: renderEntry,
+        isDiscardPage,
+        // Lecture de collection et prix partagés avec la page « À vendre ».
+        shared: { loadCollection, ensurePrices, priceOf, readFamilyContext }
+      };
     }
   };
 })();

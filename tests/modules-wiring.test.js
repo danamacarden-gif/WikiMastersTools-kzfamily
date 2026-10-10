@@ -129,3 +129,20 @@ test('Mes ventes : câblé dans bootstrap, manifest, content (avant bulkDiscard)
   }
   assert.ok(read('features/app.js').indexOf('runtime.mySales.render()') < read('features/app.js').indexOf('runtime.bulkDiscard.render()'));
 });
+
+test('À vendre : câblé (logique, modale, page) dans bootstrap, manifest, content, app et réglages', () => {
+  const content = read('content.js');
+  const at = (n) => content.indexOf(`runtime.${n} = featureRegistry.${n}.create`);
+  assert.ok(at('bulkDiscardLogic') < at('sellIdeasLogic') && at('sellIdeasLogic') < at('sellIdeas'));
+  assert.ok(at('listAuctionLogic') < at('listAuction') && at('listAuction') < at('sellIdeas'));
+  assert.ok(content.includes('create(runtime.bulkDiscardLogic)'));
+  assert.match(content, /'sellIdeasLogic',\s*'listAuctionLogic',\s*'listAuction',\s*'sellIdeas'/);
+  const manifest = read('manifest.json');
+  const paths = bootstrapPaths();
+  for (const file of ['sell-ideas-logic', 'sell-ideas', 'list-auction-logic', 'list-auction']) {
+    assert.ok(paths.includes(`features/${file}.js`), `${file} absent de bootstrap.js`);
+    assert.ok(manifest.includes(`"features/${file}.js"`), `${file} absent du manifest`);
+  }
+  assert.ok(read('features/app.js').includes('runtime.sellIdeas.render()'));
+  assert.ok(read('features/settings.js').includes("sellIdeas: true"));
+});

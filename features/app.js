@@ -15,6 +15,7 @@
         runtime.myBids.render();
         runtime.mySales.render();
         runtime.bulkDiscard.render();
+        runtime.sellIdeas.render();
 
         if (isCollectionPage()) {
           runtime.collectionBulk.ensureToolbar();
@@ -109,7 +110,8 @@
             '.wm-wikipedia-card-button, .wm-missing-image-credit, .wm-missing-title-art, .wm-compact-tools, .wm-price-legend, ' +
             '.wm-auto-open-control, .wm-auto-open-help, .wm-settings-launch, .wm-settings-modal, ' +
             '.wm-copy-card-button, .wm-trade-preview-card, #wm-theme-tracker-page, #wm-theme-tracker-nav, ' +
-            '#wm-my-bids-page, #wm-my-bids-nav, #wm-my-sales-page, #wm-my-sales-nav'
+            '#wm-my-bids-page, #wm-my-bids-nav, #wm-my-sales-page, #wm-my-sales-nav, ' +
+            '#wm-sell-ideas-page, #wm-sell-ideas-nav, #wm-list-auction-overlay'
           )
         );
       }
