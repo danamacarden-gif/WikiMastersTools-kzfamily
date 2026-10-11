@@ -33,6 +33,8 @@
     'listAuctionLogic',
     'listAuction',
     'sellIdeas',
+    'saleQueueLogic',
+    'saleQueue',
     'app'
   ];
 
@@ -126,6 +128,8 @@
   runtime.listAuctionLogic = featureRegistry.listAuctionLogic.create();
   runtime.listAuction = featureRegistry.listAuction.create(runtime);
   runtime.sellIdeas = featureRegistry.sellIdeas.create(runtime);
+  runtime.saleQueueLogic = featureRegistry.saleQueueLogic.create();
+  runtime.saleQueue = featureRegistry.saleQueue.create(runtime);
   runtime.app = featureRegistry.app.create(runtime);
 
   runtime.app.startObserver();

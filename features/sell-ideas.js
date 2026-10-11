@@ -407,6 +407,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         row.append(price);
 
         if (item.listed || runtime.listAuction.isListed(item.id)) row.append(el('span', 'wm-sell-tag', 'En vente'));
+        else if (runtime.saleQueue?.isQueued?.(item.id)) row.append(el('span', 'wm-sell-tag', 'En file'));
         else row.append(button('Vendre…', 'is-small', () => runtime.listAuction.open({
           cardId: item.id, title: item.title, rarity: item.rarity, average: item.price
         })));
@@ -478,6 +479,8 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
       }
 
       runtime.listAuction.onChange(() => { fetchSellingIds().then(() => renderResults()); });
+      // La file de ventes est créée après cette page : on écoute son événement plutôt que son API.
+      window.addEventListener('wm-sale-queue-change', () => renderResults());
 
       // ---- Menu et route -----------------------------------------------------------------------
 

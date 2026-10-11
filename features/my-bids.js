@@ -10,6 +10,8 @@
 
       const SOUND_KEY = 'wm_my_bids_sound_v1';
       const AUTO_KEY = 'wm_auto_bids_v1';
+      // Enchères que l'on ne veut plus suivre : { auctionId: masquéeLe }. Purgées quand l'enchère se termine.
+      const HIDDEN_KEY = 'wm_hidden_bids_v1';
       // Dans les 45 dernières secondes d'une enchère armée, on relit la liste toutes les 1,5 s.
       const FAST_WINDOW_MS = 45 * 1000;
       const FAST_REFRESH_MS = 1500;
@@ -38,6 +40,10 @@
         minHints: new Map(),
         // Auto-enchère : réglages par enchère (persistés), brouillons de saisie, panneaux ouverts.
         autoBids: autoLogic.normalizeStore(readLocalValue(AUTO_KEY), Date.now()),
+        hidden: (() => {
+          const raw = readLocalValue(HIDDEN_KEY);
+          return raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
+        })(),
         autoDrafts: new Map(),
         autoOpen: new Set(),
         autoNotes: new Map(),
@@ -93,6 +99,27 @@
 
 .wm-bids-auto-btn:hover {
   border-color: rgba(52, 211, 153, 0.5);
+}
+
+.wm-bids-auto-btn.wm-bids-hide {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
+.wm-bids-auto-btn.wm-bids-hide:hover {
+  opacity: 1;
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #f87171;
+}
+
+.wm-bids-unhide {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .wm-bids-auto-btn.is-primary {
@@ -338,7 +365,7 @@
 
       function checkAlerts() {
         if (state.soundOn && !audioRunning()) return;
-        const fresh = alerts.collect(state.bids, serverNow());
+        const fresh = alerts.collect(visibleBids(), serverNow());
         if (fresh.length && state.soundOn) playUrgentBeep();
       }
 
@@ -402,6 +429,7 @@
           }
           state.userId = logic.parseUserIdFromCookies(document.cookie);
           forgetFinishedAutoBids(ids);
+          forgetFinishedHidden(ids);
           state.error = null;
           state.loaded = true;
           state.updatedAt = Date.now();
@@ -488,6 +516,43 @@
         writeLocalValue(AUTO_KEY, state.autoBids);
       }
 
+      const isHidden = (auctionId) => Object.prototype.hasOwnProperty.call(state.hidden, auctionId);
+      const visibleBids = () => state.bids.filter((bid) => !isHidden(bid.id));
+
+      function saveHidden() {
+        writeLocalValue(HIDDEN_KEY, state.hidden);
+      }
+
+      // « Ne plus suivre » : désarme et oublie l'auto-enchère, puis retire la ligne de la liste.
+      // N'a aucun effet côté WikiMasters : une mise déjà placée reste valable.
+      function hideBid(bid) {
+        const leading = logic.bidStatus(bid, state.userId) === 'leading';
+        if (leading && !window.confirm(`Tu es en tête sur « ${bid.card?.wikipedia_title || 'cette carte'} » : tu peux encore la remporter et payer ta mise. La masquer quand même ?`)) return;
+        removeAutoConfig(bid.id);
+        state.rowErrors.delete(bid.id);
+        state.hidden = { ...state.hidden, [bid.id]: Date.now() };
+        saveHidden();
+        renderAll();
+      }
+
+      function showHiddenBids() {
+        state.hidden = {};
+        saveHidden();
+        renderAll();
+      }
+
+      function forgetFinishedHidden(presentIds) {
+        let changed = false;
+        for (const id of Object.keys(state.hidden)) {
+          if (!presentIds.has(id)) {
+            const { [id]: _removed, ...rest } = state.hidden;
+            state.hidden = rest;
+            changed = true;
+          }
+        }
+        if (changed) saveHidden();
+      }
+
       function setAutoConfig(auctionId, config) {
         state.autoBids = { ...state.autoBids, [auctionId]: { ...config, updatedAt: Date.now() } };
         saveAutoBids();
@@ -563,7 +628,7 @@
 
         for (const bid of state.bids) {
           const config = state.autoBids[bid.id];
-          if (!config?.armed) continue;
+          if (!config?.armed || isHidden(bid.id)) continue;
 
           const remaining = logic.remainingMs(bid, now);
           if (remaining > 0 && remaining <= FAST_WINDOW_MS) needFast = true;
@@ -672,7 +737,18 @@
             sub.classList.remove('is-error');
           } else {
             const time = new Date(state.updatedAt).toLocaleTimeString('fr-FR');
-            sub.textContent = `${state.bids.length} en cours, actualisé à ${time}`;
+            const hiddenCount = state.bids.length - visibleBids().length;
+            sub.replaceChildren(document.createTextNode(
+              `${state.bids.length - hiddenCount} en cours, actualisé à ${time}`
+            ));
+            if (hiddenCount) {
+              sub.append(document.createTextNode(` • ${hiddenCount} masquée${hiddenCount > 1 ? 's' : ''} `));
+              const show = el('button', 'wm-bids-unhide', 'Réafficher');
+              show.type = 'button';
+              show.dataset.role = 'unhide';
+              show.addEventListener('click', showHiddenBids);
+              sub.append(show);
+            }
             sub.classList.remove('is-error');
           }
         }
@@ -728,7 +804,8 @@
           if (!state.autoDrafts.has(bid.id)) {
             state.autoDrafts.set(bid.id, {
               max: config ? String(config.max) : '',
-              maxBids: String(config ? config.maxBids : autoLogic.DEFAULT_MAX_BIDS)
+              // Plus de champ « Mises max » : plafond de sécurité fixe, seul le prix max se règle.
+              maxBids: String(autoLogic.MAX_BIDS_CAP)
             });
           }
           state.autoOpen.add(bid.id);
@@ -739,7 +816,7 @@
           const summary = el(
             'span',
             'wm-bids-auto-state is-armed',
-            `⚡ Auto armée : max ${formatAmount(config.max)} • ${config.placed}/${config.maxBids} mise${config.maxBids > 1 ? 's' : ''} • à ${autoLogic.TRIGGER_MS / 1000} s de la fin`
+            `⚡ Auto armée : max ${formatAmount(config.max)} • ${config.placed} mise${config.placed > 1 ? 's' : ''} placée${config.placed > 1 ? 's' : ''} • à ${autoLogic.TRIGGER_MS / 1000} s de la fin`
           );
           const off = el('button', 'wm-bids-auto-btn', 'Désarmer');
           off.type = 'button';
@@ -761,7 +838,7 @@
           return block;
         }
 
-        const draft = state.autoDrafts.get(bid.id) || { max: '', maxBids: String(autoLogic.DEFAULT_MAX_BIDS) };
+        const draft = state.autoDrafts.get(bid.id) || { max: '', maxBids: String(autoLogic.MAX_BIDS_CAP) };
         const panel = el('form', 'wm-bids-auto-panel');
         panel.dataset.role = 'auto-panel';
         // Nos messages d'erreur remplacent les bulles natives du navigateur.
@@ -786,7 +863,6 @@
         };
 
         const maxField = field('Prix max (W)', 'max', { min: String(minimum), placeholder: `≥ ${minimum}` });
-        const bidsField = field(`Mises max (1-${autoLogic.MAX_BIDS_CAP})`, 'maxBids', { min: '1', max: String(autoLogic.MAX_BIDS_CAP) });
 
         const error = el('div', 'wm-bids-auto-error');
         error.dataset.role = 'auto-error';
@@ -808,7 +884,7 @@
         const help = el(
           'p',
           'wm-bids-auto-help',
-          `À ${autoLogic.TRIGGER_MS / 1000} s de la fin, si tu n’es pas en tête, mise le minimum requis (${formatAmount(minimum)} maintenant), puis recommence après chaque surenchère, jusqu’au prix max ou au nombre de mises choisi. Onglet à garder ouvert et visible.`
+          `À ${autoLogic.TRIGGER_MS / 1000} s de la fin, si tu n’es pas en tête, mise le minimum requis (${formatAmount(minimum)} maintenant), puis recommence après chaque surenchère, jusqu’au prix max (${autoLogic.MAX_BIDS_CAP} mises au plus). Onglet à garder ouvert et visible.`
         );
 
         panel.addEventListener('submit', (event) => {
@@ -839,7 +915,7 @@
 
         const buttons = el('div', 'wm-bids-auto-buttons');
         buttons.append(arm, cancel);
-        panel.append(maxField, bidsField, buttons, error, help);
+        panel.append(maxField, buttons, error, help);
         block.append(panel);
         return block;
       }
@@ -888,7 +964,14 @@
         button.addEventListener('click', () => placeBid(bid.id));
 
         row.append(info, price, countdown, button);
-        row.append(buildAutoBlock(bid, remaining));
+        const autoBlock = buildAutoBlock(bid, remaining);
+        const hide = el('button', 'wm-bids-auto-btn wm-bids-hide', 'Ne plus suivre');
+        hide.type = 'button';
+        hide.dataset.role = 'hide';
+        hide.title = 'Désarme l’auto-enchère et retire cette enchère de la liste (réaffichable en haut de page).';
+        hide.addEventListener('click', () => hideBid(bid));
+        autoBlock.append(hide);
+        row.append(autoBlock);
 
         const note = state.autoNotes.get(bid.id);
         if (note) row.append(el('div', 'wm-bids-auto-note', note));
@@ -910,7 +993,7 @@
         let list = content.querySelector('[data-role="list"]');
         if (!list) return;
 
-        const sorted = logic.sortBids(state.bids, serverNow());
+        const sorted = logic.sortBids(visibleBids(), serverNow());
 
         // Une ligne dont un champ a le focus n'est pas reconstruite : sinon l'actualisation
         // (toutes les 1,5 s en fin d'enchère) ferait perdre la saisie.

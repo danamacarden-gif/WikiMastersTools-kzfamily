@@ -48,6 +48,35 @@
       }
     }
 
+    // Passe par le pont de l'extension (comme le classement) : il retrouve l'exemplaire possédé
+    // (user card) à partir de l'identifiant catalogue, écarte les copies déjà en vente, réessaie
+    // avec un autre exemplaire si le serveur répond « Vous ne possédez pas cette carte ».
+    function createListing(detail, onProgress) {
+      return new Promise((resolve) => {
+        const requestId = `la:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        const cleanup = () => {
+          window.removeEventListener('wm-average-create-listing-result', onResult);
+          window.removeEventListener('wm-average-create-listing-progress', onProg);
+          clearTimeout(timer);
+        };
+        const onResult = (event) => {
+          if (event.detail?.requestId !== requestId) return;
+          cleanup();
+          resolve(event.detail);
+        };
+        const onProg = (event) => {
+          if (event.detail?.requestId === requestId) onProgress?.(event.detail.state);
+        };
+        const timer = setTimeout(() => {
+          cleanup();
+          resolve({ ok: false, error: 'Pas de réponse de l’extension (recharge la page).' });
+        }, 60 * 1000);
+        window.addEventListener('wm-average-create-listing-result', onResult);
+        window.addEventListener('wm-average-create-listing-progress', onProg);
+        window.dispatchEvent(new CustomEvent('wm-average-create-listing', { detail: { requestId, ...detail } }));
+      });
+    }
+
     function close() {
       document.getElementById(OVERLAY_ID)?.remove();
       document.removeEventListener('keydown', onKey, true);
@@ -65,12 +94,13 @@
       listeners.add(callback);
     }
 
-    // card : { cardId, title, rarity, average }
+    // card : { cardId (identifiant catalogue), title, rarity, average, ownedCardId? }
     function open(card) {
       if (!card?.cardId || document.getElementById(OVERLAY_ID)) return;
       runtime.uiKit?.injectStyles?.('wm-list-auction-styles', CSS);
 
-      const state = { minutes: logic.DEFAULT_MINUTES, sent: false };
+      const state = { minutes: logic.DEFAULT_MINUTES, sent: false, queueMode: false };
+      const queue = runtime.saleQueue?.enabled?.() ? runtime.saleQueue : null;
       const overlay = el('div');
       overlay.id = OVERLAY_ID;
       overlay.addEventListener('mousedown', (event) => { if (event.target === overlay && !busy) close(); });
@@ -116,6 +146,14 @@
 
       const setMsg = (text, kind) => { msg.textContent = text; msg.className = `wm-la-msg${kind ? ` is-${kind}` : ''}`; };
 
+      // Places pleines : la modale propose la file d'attente au lieu d'échouer.
+      function enterQueueMode() {
+        state.queueMode = true;
+        go.textContent = 'Ajouter à la file';
+        go.disabled = false;
+        setMsg('Tes places d’enchères sont toutes prises : la vente partira automatiquement dès qu’une place se libère (onglet WikiMasters ouvert).');
+      }
+
       go.addEventListener('click', async () => {
         if (busy || state.sent) return;
         const built = logic.buildBody({ cardId: card.cardId, baseAmount: amount.value, minutes: state.minutes });
@@ -124,20 +162,62 @@
           return;
         }
 
+        if (state.queueMode && queue) {
+          const added = queue.add({
+            catalogueCardId: card.cardId,
+            title: card.title,
+            rarity: card.rarity,
+            average: card.average,
+            baseAmount: built.body.base_amount,
+            durationMinutes: built.body.duration_minutes
+          });
+          if (!added.ok) {
+            setMsg(added.reason === 'full' ? 'La file est pleine (100 ventes).' : 'Impossible d’ajouter à la file.', 'error');
+            return;
+          }
+          state.sent = true;
+          for (const cb of listeners) { try { cb(); } catch (_) { /* ignoré */ } }
+          const position = queue.list().items.length;
+          setMsg(`Ajoutée à la file (position ${position}) : ${built.body.base_amount} W, partira dès qu’une place se libère.`, 'ok');
+          actions.replaceChildren();
+          const see = el('a', 'wm-la-go', 'Voir la file');
+          see.href = '/marketplace?wm=sales&tab=queue';
+          const done = el('button', '', 'Fermer'); done.type = 'button';
+          done.addEventListener('click', close);
+          actions.append(see, done);
+          return;
+        }
+
         busy = true; go.disabled = true; cancel.disabled = true; setMsg('Création de l’enchère…');
         try {
-          const response = await fetch('/api/marketplace', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { accept: '*/*', 'content-type': 'application/json' },
-            body: JSON.stringify(built.body)
-          });
-          let json = null;
-          try { json = await response.json(); } catch (_) { /* corps vide */ }
-          if (!response.ok) {
-            throw new Error(String(json?.error || json?.message || `HTTP ${response.status}`));
+          const request = {
+            catalogueCardId: card.cardId,
+            ownedCardId: card.ownedCardId || null,
+            title: card.title,
+            baseAmount: built.body.base_amount,
+            durationMinutes: built.body.duration_minutes,
+            allowStarred: false
+          };
+          const progress = (step) => {
+            if (step === 'resolving-id') setMsg('Recherche de ton exemplaire…');
+            else if (step === 'refreshing-id') setMsg('Exemplaire périmé, recherche d’un autre…');
+          };
+
+          let result = await createListing(request, progress);
+
+          if (!result.ok && result.needsStarredConfirmation) {
+            const confirmed = window.confirm(`Ton seul exemplaire disponible de « ${card.title || 'cette carte'} » est en favori. Le mettre en vente quand même ?`);
+            if (!confirmed) throw new Error('Vente annulée : exemplaire en favori conservé.');
+            result = await createListing({ ...request, ownedCardId: result.ownedCardId || null, allowStarred: true }, progress);
           }
 
+          if (!result.ok) {
+            if (result.alreadyListed) throw new Error('Toutes tes copies de cette carte sont déjà en vente.');
+            if (result.notOwned) throw new Error('Tu ne possèdes plus cette carte (collection à recharger).');
+            throw new Error(String(result.error || 'Création impossible.'));
+          }
+
+          const json = result.listing;
           state.sent = true;
           listed.add(card.cardId);
           for (const cb of listeners) { try { cb(); } catch (_) { /* ignoré */ } }
@@ -154,7 +234,11 @@
           actions.append(done);
         } catch (error) {
           // Échec : rien n'est marqué comme listé, l'utilisateur peut corriger et réessayer.
-          setMsg(`Échec : ${error.message}`, 'error');
+          if (queue && /maximum|simultan/i.test(error.message)) {
+            enterQueueMode();
+          } else {
+            setMsg(`Échec : ${error.message}`, 'error');
+          }
           go.disabled = false;
         } finally {
           busy = false; cancel.disabled = false;
@@ -170,11 +254,19 @@
       fetchSlots().then((slots) => {
         if (!slots || !overlay.isConnected) return;
         slotsLine.textContent = `Enchères actives : ${slots.used}/${slots.max}`;
-        if (slots.full) { setMsg('Tu as déjà atteint le maximum d’enchères simultanées.', 'error'); go.disabled = true; }
+        if (slots.full) {
+          if (queue) enterQueueMode();
+          else { setMsg('Tu as déjà atteint le maximum d’enchères simultanées.', 'error'); go.disabled = true; }
+        }
       });
     }
 
-    return { open, isListed, onChange, close };
+    function markListed(cardId) {
+      listed.add(cardId);
+      for (const cb of listeners) { try { cb(); } catch (_) { /* ignoré */ } }
+    }
+
+    return { open, isListed, onChange, close, createListing, markListed };
   }
 
   if (registry) registry.listAuction = { create };

@@ -32,7 +32,13 @@
         loaded: false,
         error: '',
         skewMs: 0,
-        updatedAt: 0
+        updatedAt: 0,
+        tab: 'current', // 'current' | 'history' | 'queue'
+        history: [],
+        historySources: [],
+        responseKeys: [],
+        historyFilter: 'all', // 'all' | 'sold' | 'unsold' | 'cancelled'
+        historySort: 'date' // 'date' | 'price' | 'rarity'
       };
 
       let running = false;
@@ -89,6 +95,64 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 .wm-sales-bid.is-top { background: rgba(52, 211, 153, 0.12); }
 .wm-sales-bid .wm-sales-when { opacity: 0.6; }
 .wm-sales-nobid { font-size: 0.82rem; opacity: 0.65; }
+.wm-sales-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--color-border, rgba(255,255,255,.12)); }
+.wm-sales-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; color: inherit; opacity: .65; padding: 8px 12px; font: inherit; font-weight: 700; font-size: .9rem; cursor: pointer; }
+.wm-sales-tab:hover { opacity: 1; }
+.wm-sales-tab.is-active { opacity: 1; border-bottom-color: #7c3aed; }
+.wm-sales-tab span { margin-left: 6px; font-size: .75rem; opacity: .7; font-variant-numeric: tabular-nums; }
+.wm-hist-tools { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.wm-hist-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.wm-hist-chip { appearance: none; border: 1px solid var(--color-border, rgba(255,255,255,.16)); background: transparent; color: inherit; border-radius: 999px; padding: 4px 11px; font: inherit; font-size: .8rem; cursor: pointer; }
+.wm-hist-chip.is-active { background: rgba(124,58,237,.22); border-color: #7c3aed; }
+.wm-hist-chip strong { margin-left: 4px; font-variant-numeric: tabular-nums; }
+.wm-hist-sort { display: flex; align-items: center; gap: 6px; font-size: .8rem; opacity: .85; }
+.wm-hist-sort select { background: var(--color-surface, #111114); color: inherit; border: 1px solid var(--color-border, rgba(255,255,255,.16)); border-radius: 8px; padding: 4px 8px; font: inherit; }
+.wm-hist-list { display: grid; border: 1px solid var(--color-border, rgba(255,255,255,.12)); border-radius: 12px; overflow: hidden; }
+.wm-hist-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) 96px 104px 112px; align-items: center; gap: 10px; padding: 8px 12px; font-size: .85rem; border-top: 1px solid var(--color-border, rgba(255,255,255,.08)); border-left: 3px solid transparent; }
+.wm-hist-row:first-child { border-top: 0; }
+.wm-hist-row:nth-child(even) { background: rgba(255,255,255,.025); }
+.wm-hist-row.is-sold { border-left-color: #34d399; }
+.wm-hist-row.is-unsold { border-left-color: #6b7280; }
+.wm-hist-row.is-unsold .wm-hist-name, .wm-hist-row.is-cancelled .wm-hist-name { opacity: .8; }
+.wm-hist-row.is-cancelled { border-left-color: #fb923c; }
+.wm-hist-name { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.wm-hist-name a { color: inherit; font-weight: 600; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wm-hist-name a:hover { text-decoration: underline; }
+.wm-hist-relist { flex: none; padding: 1px 7px; border-radius: 999px; background: rgba(96,165,250,.18); color: #93c5fd; font-size: .7rem; font-weight: 700; cursor: help; }
+.wm-hist-price { text-align: right; font-variant-numeric: tabular-nums; display: grid; }
+.wm-hist-price small { font-size: .7rem; opacity: .6; }
+.wm-hist-date { font-size: .78rem; opacity: .7; font-variant-numeric: tabular-nums; text-align: right; }
+.wm-hist-status { justify-self: end; padding: 3px 10px; border-radius: 999px; font-size: .74rem; font-weight: 700; white-space: nowrap; }
+.wm-hist-status.is-sold { background: rgba(52,211,153,.16); color: #34d399; }
+.wm-hist-status.is-unsold { background: rgba(148,163,184,.14); color: #cbd5e1; }
+.wm-hist-status.is-cancelled { background: rgba(251,146,60,.16); color: #fb923c; }
+.wm-hist-head { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; opacity: .55; background: none !important; border-left-color: transparent !important; }
+.wm-queue-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border: 1px solid var(--color-border, rgba(255,255,255,.12)); border-radius: 12px; font-size: .85rem; }
+.wm-queue-bar.is-paused { border-color: rgba(251,146,60,.5); }
+.wm-queue-event { opacity: .75; font-size: .8rem; }
+.wm-queue-btn { appearance: none; border: 1px solid var(--color-border, rgba(255,255,255,.18)); background: transparent; color: inherit; border-radius: 8px; padding: 4px 10px; font: inherit; font-size: .78rem; font-weight: 700; cursor: pointer; }
+.wm-queue-btn:hover:not(:disabled) { border-color: #7c3aed; }
+.wm-queue-btn:disabled { opacity: .35; cursor: default; }
+.wm-queue-btn.is-danger:hover { border-color: #f87171; color: #f87171; }
+.wm-queue-row { display: grid; grid-template-columns: 26px 38px minmax(0, 1fr) 90px 60px auto; align-items: center; gap: 10px; padding: 8px 12px; font-size: .85rem; border-top: 1px solid var(--color-border, rgba(255,255,255,.08)); }
+.wm-queue-row:first-child { border-top: 0; }
+.wm-queue-row.is-error { background: rgba(248,113,113,.06); }
+.wm-queue-pos { opacity: .55; font-variant-numeric: tabular-nums; text-align: right; }
+.wm-queue-name { min-width: 0; display: grid; }
+.wm-queue-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wm-queue-name small { font-size: .74rem; opacity: .6; }
+.wm-queue-name small.is-error { color: #f87171; opacity: 1; }
+.wm-queue-actions { display: flex; gap: 4px; justify-content: end; }
+@media (max-width: 620px) { .wm-queue-row { grid-template-columns: 22px minmax(0, 1fr) auto; } .wm-queue-row > :nth-child(2), .wm-queue-row > :nth-child(5) { display: none; } .wm-queue-actions { grid-column: 1 / -1; } }
+.wm-hist-note { font-size: .75rem; opacity: .6; margin: 0; }
+@media (max-width: 620px) {
+  .wm-hist-row { grid-template-columns: 34px minmax(0, 1fr) auto; row-gap: 2px; }
+  .wm-hist-date { grid-column: 2; text-align: left; grid-row: 2; }
+  .wm-hist-price { grid-column: 3; grid-row: 1; }
+  .wm-hist-status { grid-column: 3; grid-row: 2; }
+  .wm-hist-row > :first-child { grid-row: span 2; }
+  .wm-hist-head { display: none; }
+}
 @media (max-width: 520px) { .wm-sales-row { grid-template-columns: 104px minmax(0, 1fr); } .wm-sales-art { width: 104px; height: 156px; } .wm-sales-card-pic { flex-basis: 64px; } .wm-sales-card-sum { display: none; } }
 `;
 
@@ -113,7 +177,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         }
 
         const json = await response.json();
-        return { sales: logic.extractSales(json), max: Number(json?.maxConcurrentAuctions) || null };
+        return { sales: logic.extractSales(json), max: Number(json?.maxConcurrentAuctions) || null, json };
       }
 
       async function fetchBidHistory(id) {
@@ -149,7 +213,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
             state.histories.set(sale.id, { sig: null, bids: known?.bids || [], error: true });
           }
 
-          renderList();
+          if (state.tab === 'current') renderList();
           await new Promise((resolve) => setTimeout(resolve, DETAIL_GAP_MS));
         }
       }
@@ -159,7 +223,14 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         refreshing = true;
 
         try {
-          const { sales, max } = await fetchSales();
+          const { sales, max, json } = await fetchSales();
+          const history = logic.extractHistory(json);
+          const historySig = history.items.map((item) => `${item.id}:${item._status}`).join('|');
+          const historyChanged = historySig !== state.historySig;
+          state.historySig = historySig;
+          state.history = history.items;
+          state.historySources = history.sources;
+          state.responseKeys = json && typeof json === 'object' ? Object.keys(json) : [];
           const fresh = logic.detectNewBids(state.sigs, sales);
           const now = Date.now();
           for (const id of fresh) state.newUntil.set(id, now + NEW_BID_MS);
@@ -168,9 +239,10 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           state.sales = sales;
           state.maxConcurrent = max;
           state.loaded = true;
+          const wasError = Boolean(state.error);
           state.error = '';
           state.updatedAt = now;
-          renderAll();
+          if (state.tab !== 'history' || historyChanged || wasError) renderAll();
           await refreshHistories();
         } catch (error) {
           state.error = String(error?.message || error);
@@ -332,6 +404,254 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         node.classList.toggle('is-urgent', ms > 0 && ms < 60 * 1000);
       }
 
+      function setTab(tab) {
+        if (state.tab === tab) return;
+        state.tab = tab;
+        try { sessionStorage.setItem('wm-sales-tab', tab); } catch (_) { /* stockage indisponible */ }
+        renderAll();
+      }
+
+      function buildTabs() {
+        const tabs = el('div', 'wm-sales-tabs');
+        tabs.setAttribute('role', 'tablist');
+        const make = (id, label, count) => {
+          const button = el('button', `wm-sales-tab${state.tab === id ? ' is-active' : ''}`, label);
+          button.type = 'button';
+          button.setAttribute('role', 'tab');
+          button.setAttribute('aria-selected', String(state.tab === id));
+          button.dataset.role = `tab-${id}`;
+          if (state.loaded && count != null) button.append(el('span', '', String(count)));
+          button.addEventListener('click', () => setTab(id));
+          return button;
+        };
+        tabs.append(make('current', 'En cours', state.sales.length), make('history', 'Historique', state.history.length));
+        const queue = queueApi();
+        if (queue) tabs.append(make('queue', 'File d’attente', queue.list().items.length));
+        return tabs;
+      }
+
+      const STATUS_LABELS = { sold: 'Vendue', unsold: 'Non vendue', cancelled: 'Annulée' };
+
+      function buildHistoryControls() {
+        const nodes = [];
+        if (!state.loaded || (state.error && !state.history.length)) return nodes;
+
+        const info = logic.historyStats(state.history);
+        const stats = el('div', 'wm-sales-stats');
+        stats.dataset.role = 'history-stats';
+        const stat = (label, value) => {
+          const box = el('div', 'wm-sales-stat');
+          box.append(el('span', '', label), strong(value));
+          return box;
+        };
+        stats.append(
+          stat('Taux de vente', info.rate == null ? '—' : `${Math.round(info.rate * 100)} % (${info.counts.sold} / ${info.counts.sold + info.counts.unsold})`),
+          stat('Total encaissé', formatAmount(info.earned)),
+          stat('Prix moyen vendu', info.average == null ? '—' : formatAmount(info.average))
+        );
+        nodes.push(stats);
+
+        const tools = el('div', 'wm-hist-tools');
+        const chips = el('div', 'wm-hist-chips');
+        for (const [id, label] of [['all', 'Toutes'], ['sold', 'Vendues'], ['unsold', 'Invendues'], ['cancelled', 'Annulées']]) {
+          const chip = el('button', `wm-hist-chip${state.historyFilter === id ? ' is-active' : ''}`, label);
+          chip.type = 'button';
+          chip.dataset.role = `filter-${id}`;
+          chip.append(strong(String(info.counts[id] ?? 0)));
+          chip.addEventListener('click', () => { state.historyFilter = id; renderAll(); });
+          chips.append(chip);
+        }
+
+        const sortWrap = el('label', 'wm-hist-sort', 'Trier par');
+        const select = document.createElement('select');
+        select.dataset.role = 'history-sort';
+        for (const [id, label] of [['date', 'Date'], ['price', 'Prix'], ['rarity', 'Rareté']]) {
+          const option = document.createElement('option');
+          option.value = id;
+          option.textContent = label;
+          option.selected = state.historySort === id;
+          select.append(option);
+        }
+        select.addEventListener('change', () => { state.historySort = select.value; renderList(); });
+        sortWrap.append(select);
+
+        tools.append(chips, sortWrap);
+        nodes.push(tools);
+        return nodes;
+      }
+
+      function buildHistoryRow(item, relists) {
+        const status = item._status;
+        const row = el('div', `wm-hist-row is-${status}`);
+        row.dataset.role = 'history-row';
+        row.dataset.status = status;
+
+        const badge = kit.createRarityBadge(logic.rarityOf(item));
+        const badgeCell = el('div');
+        if (badge) badgeCell.append(badge);
+
+        const name = el('div', 'wm-hist-name');
+        const link = document.createElement('a');
+        link.href = UUID.test(String(item.id)) ? `/marketplace/${item.id}` : '#';
+        link.textContent = item.card?.wikipedia_title || 'Carte';
+        link.title = link.textContent;
+        name.append(link);
+
+        const times = relists.get(logic.cardKey(item)) || 0;
+        if (times > 1) {
+          const tag = el('span', 'wm-hist-relist', `×${times}`);
+          tag.dataset.role = 'relist';
+          tag.title = `Carte mise en vente ${times} fois dans cet historique.`;
+          name.append(tag);
+        }
+
+        const price = el('div', 'wm-hist-price');
+        const start = logic.startPrice(item);
+        if (status === 'sold') {
+          price.append(strong(formatAmount(logic.soldPrice(item) ?? start ?? 0)));
+          if (start) price.append(el('small', '', `départ ${formatAmount(start)}`));
+        } else {
+          price.append(el('span', '', start ? formatAmount(start) : '—'), el('small', '', 'prix de départ'));
+        }
+
+        const date = el('div', 'wm-hist-date', item._endedAt ? dateTimeFormat.format(item._endedAt) : '—');
+        const pill = el('span', `wm-hist-status is-${status}`, STATUS_LABELS[status] || status);
+
+        row.append(badgeCell, name, price, date, pill);
+        return row;
+      }
+
+      function renderHistoryList(list) {
+        if (!state.history.length) {
+          const empty = el('div', 'wm-sales-empty', state.responseKeys.length
+            ? `Aucune vente terminée trouvée dans la réponse de WikiMasters (clés reçues : ${state.responseKeys.join(', ')}).`
+            : 'Aucune vente terminée.');
+          empty.dataset.role = 'history-empty';
+          list.replaceChildren(empty);
+          return;
+        }
+
+        const relists = logic.relistCounts(state.history);
+        const items = logic.sortHistory(logic.filterHistory(state.history, state.historyFilter), state.historySort);
+        const table = el('div', 'wm-hist-list');
+        table.dataset.role = 'history-list';
+        const head = el('div', 'wm-hist-row wm-hist-head');
+        head.append(el('span', '', ''), el('span', '', 'Carte'), el('span', '', 'Prix'), el('span', '', 'Fin'), el('span', '', 'Statut'));
+        head.children[2].style.textAlign = 'right';
+        head.children[3].style.textAlign = 'right';
+        head.children[4].style.justifySelf = 'end';
+        table.append(head);
+
+        if (!items.length) {
+          const empty = el('div', 'wm-sales-empty', 'Aucune vente pour ce filtre.');
+          empty.style.border = '0';
+          table.append(empty);
+        } else {
+          table.append(...items.map((item) => buildHistoryRow(item, relists)));
+        }
+        list.replaceChildren(table);
+      }
+
+      const queueApi = () => (runtime.saleQueue?.enabled?.() ? runtime.saleQueue : null);
+      const durationLabel = (minutes) =>
+        runtime.listAuctionLogic?.DURATIONS?.find((d) => d.minutes === minutes)?.label || `${minutes} min`;
+
+      function buildQueueControls() {
+        const queue = queueApi();
+        if (!queue) return [];
+        const store = queue.list();
+        const slots = queue.lastSlots();
+        const bar = el('div', `wm-queue-bar${store.paused ? ' is-paused' : ''}`);
+        bar.dataset.role = 'queue-bar';
+
+        const info = el('div');
+        const pending = store.items.filter((item) => !item.error).length;
+        const errors = store.items.length - pending;
+        info.append(strong(store.paused ? 'File en pause' : (pending ? 'File active' : 'File vide')));
+        const parts = [`${pending} en attente`];
+        if (errors) parts.push(`${errors} bloquée${errors > 1 ? 's' : ''}`);
+        if (slots) parts.push(`places : ${slots.used} / ${slots.max}`);
+        info.append(document.createTextNode(` · ${parts.join(' · ')}`));
+        const event = queue.lastEvent();
+        if (event) {
+          info.append(el('br'));
+          info.append(el('span', 'wm-queue-event', event));
+        }
+
+        const buttons = el('div', 'wm-queue-actions');
+        const pause = el('button', 'wm-queue-btn', store.paused ? 'Reprendre' : 'Mettre en pause');
+        pause.type = 'button';
+        pause.dataset.role = 'queue-pause';
+        pause.addEventListener('click', () => queue.setPaused(!store.paused));
+        buttons.append(pause);
+        if (store.items.length) {
+          const clear = el('button', 'wm-queue-btn is-danger', 'Vider');
+          clear.type = 'button';
+          clear.addEventListener('click', () => {
+            if (window.confirm(`Retirer les ${store.items.length} ventes de la file ?`)) queue.clear();
+          });
+          buttons.append(clear);
+        }
+
+        bar.append(info, buttons);
+        const note = el('p', 'wm-hist-note', 'Les ventes partent dans l’ordre, au prix et pour la durée choisis, dès qu’une place se libère. Il faut qu’un onglet WikiMasters reste ouvert.');
+        return [bar, note];
+      }
+
+      function renderQueueList(list) {
+        const queue = queueApi();
+        const items = queue ? queue.list().items : [];
+        if (!items.length) {
+          const empty = el('div', 'wm-sales-empty', 'Aucune vente en file. Depuis « À vendre », « Vendre… » propose la file quand tes places sont pleines.');
+          empty.dataset.role = 'queue-empty';
+          list.replaceChildren(empty);
+          return;
+        }
+
+        const table = el('div', 'wm-hist-list');
+        table.dataset.role = 'queue-list';
+        let position = 0;
+        items.forEach((item, index) => {
+          const row = el('div', `wm-queue-row${item.error ? ' is-error' : ''}`);
+          row.dataset.role = 'queue-row';
+          row.append(el('span', 'wm-queue-pos', item.error ? '—' : String(++position)));
+
+          const badgeCell = el('div');
+          const badge = kit.createRarityBadge(item.rarity || '');
+          if (badge) badgeCell.append(badge);
+          row.append(badgeCell);
+
+          const name = el('div', 'wm-queue-name');
+          name.append(strong(item.title));
+          name.lastChild.title = item.title;
+          name.append(item.error
+            ? el('small', 'is-error', item.error)
+            : el('small', '', `ajoutée le ${dateTimeFormat.format(item.addedAt)}${item.average != null ? ` · prix moyen ${formatAmount(Math.round(item.average))}` : ''}`));
+          row.append(name);
+
+          const price = el('div', 'wm-hist-price');
+          price.append(strong(formatAmount(item.baseAmount)), el('small', '', 'mise de départ'));
+          row.append(price, el('span', 'wm-hist-date', durationLabel(item.durationMinutes)));
+
+          const actions = el('div', 'wm-queue-actions');
+          const btn = (label, title, onClick, disabled = false, extra = '') => {
+            const b = el('button', `wm-queue-btn${extra}`, label);
+            b.type = 'button';
+            b.title = title;
+            b.disabled = disabled;
+            b.addEventListener('click', onClick);
+            actions.append(b);
+          };
+          if (item.error) btn('Réessayer', 'Remettre en attente', () => queue.retry(item.id));
+          btn('↑', 'Monter', () => queue.move(item.id, -1), index === 0);
+          btn('↓', 'Descendre', () => queue.move(item.id, 1), index === items.length - 1);
+          btn('Retirer', 'Retirer de la file', () => queue.remove(item.id), false, ' is-danger');
+          row.append(actions);
+          table.append(row);
+        });
+        list.replaceChildren(table);
+      }
+
       function buildContent() {
         const nodes = [];
         const head = el('div', 'wm-sales-head');
@@ -340,11 +660,17 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         sub.dataset.role = 'sub';
         if (state.error) sub.textContent = state.error;
         else if (!state.loaded) sub.textContent = 'Chargement de tes ventes…';
+        else if (state.tab === 'history') sub.textContent = 'Tes dernières ventes terminées (les 50 dernières conservées par WikiMasters).';
+        else if (state.tab === 'queue') sub.textContent = 'Ventes planifiées : elles partent automatiquement quand une place d’enchère se libère.';
         else sub.textContent = 'Tes ventes en cours, avec le prix actuel et l’historique des mises. Actualisation automatique.';
         head.append(sub);
-        nodes.push(head);
+        nodes.push(head, buildTabs());
 
-        if (state.loaded && !state.error || state.sales.length) {
+        if (state.tab === 'queue') {
+          nodes.push(...buildQueueControls());
+        } else if (state.tab === 'history') {
+          nodes.push(...buildHistoryControls());
+        } else if (state.loaded && !state.error || state.sales.length) {
           const info = logic.summary(state.sales);
           const total = state.sales.filter(logic.hasBids).reduce((sum, sale) => sum + (logic.currentPrice(sale) || 0), 0);
           const stats = el('div', 'wm-sales-stats');
@@ -374,6 +700,16 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 
         if (!state.loaded) {
           list.replaceChildren();
+          return;
+        }
+
+        if (state.tab === 'history') {
+          renderHistoryList(list);
+          return;
+        }
+
+        if (state.tab === 'queue') {
+          renderQueueList(list);
           return;
         }
 
@@ -423,9 +759,13 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         if (!document.hidden && running) refresh().then(schedule);
       }
 
+      let queueUnsubscribe = null;
+      const onQueueChange = () => { if (running && state.tab === 'queue') renderAll(); };
+
       function start() {
         if (running) return;
         running = true;
+        if (!queueUnsubscribe && runtime.saleQueue?.onChange) queueUnsubscribe = runtime.saleQueue.onChange(onQueueChange);
         document.addEventListener('visibilitychange', onVisibility);
         tickTimer = setInterval(tick, 1000);
         refresh().then(schedule);
@@ -433,6 +773,8 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 
       function stop() {
         running = false;
+        queueUnsubscribe?.();
+        queueUnsubscribe = null;
         clearTimeout(pollTimer);
         clearInterval(tickTimer);
         pollTimer = null;
@@ -524,6 +866,10 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         if (!page) {
           kit.ensureStyles();
           kit.injectStyles('wm-my-sales-styles', CSS);
+          try {
+            const wanted = new URLSearchParams(location.search).get('tab') || sessionStorage.getItem('wm-sales-tab');
+            if (wanted === 'history' || (wanted === 'queue' && queueApi())) state.tab = wanted;
+          } catch (_) { /* stockage indisponible */ }
           page = el('section', 'wm-sales-page');
           page.id = PAGE_ID;
           const shell = el('div', 'wm-sales-shell');
