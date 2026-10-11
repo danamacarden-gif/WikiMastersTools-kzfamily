@@ -176,7 +176,30 @@
       };
     }
 
+    // Enchères que l'utilisateur a retirées de sa liste (masquage local : la mise éventuelle reste valable sur le site).
+    function normalizeDismissed(raw) {
+      const out = {};
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+      for (const [id, at] of Object.entries(raw)) {
+        if (id && Number.isFinite(Number(at))) out[id] = Number(at);
+      }
+      return out;
+    }
+
+    // Une enchère qui n'est plus renvoyée par le site est terminée : on oublie son masquage.
+    function pruneDismissed(dismissed, presentIds) {
+      const present = presentIds instanceof Set ? presentIds : new Set(presentIds || []);
+      const out = {};
+      for (const [id, at] of Object.entries(dismissed || {})) if (present.has(id)) out[id] = at;
+      return out;
+    }
+
+    const visibleBids = (bids, dismissed) => (Array.isArray(bids) ? bids : []).filter((bid) => !(dismissed && dismissed[bid.id]));
+
     return {
+      normalizeDismissed,
+      pruneDismissed,
+      visibleBids,
       parseUserIdFromCookies,
       parseAccessTokenFromCookies,
       extractBids,

@@ -39,6 +39,8 @@
           title: String(card.title),
           rarity: card.rarity || null,
           imageUrl: card.imageUrl || null,
+          // Un exemplaire non favori : le site vend l'exemplaire désigné ; sinon le pont en cherche un.
+          ownedCardId: card.starred === true ? null : (card.ownedCardId || (ids ? card.ownedCardIds[0] : null) || null),
           copies: Math.max(1, Number(card.count) || 1, ids),
           starred: card.starred === true,
           tagCount: Array.isArray(card.tags) ? card.tags.length : 0,

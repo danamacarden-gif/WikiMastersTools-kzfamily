@@ -10,8 +10,7 @@
 
       const SOUND_KEY = 'wm_my_bids_sound_v1';
       const AUTO_KEY = 'wm_auto_bids_v1';
-      // Enchères que l'on ne veut plus suivre : { auctionId: masquéeLe }. Purgées quand l'enchère se termine.
-      const HIDDEN_KEY = 'wm_hidden_bids_v1';
+      const DISMISSED_KEY = 'wm_bids_dismissed_v1';
       // Dans les 45 dernières secondes d'une enchère armée, on relit la liste toutes les 1,5 s.
       const FAST_WINDOW_MS = 45 * 1000;
       const FAST_REFRESH_MS = 1500;
@@ -40,13 +39,11 @@
         minHints: new Map(),
         // Auto-enchère : réglages par enchère (persistés), brouillons de saisie, panneaux ouverts.
         autoBids: autoLogic.normalizeStore(readLocalValue(AUTO_KEY), Date.now()),
-        hidden: (() => {
-          const raw = readLocalValue(HIDDEN_KEY);
-          return raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
-        })(),
         autoDrafts: new Map(),
         autoOpen: new Set(),
         autoNotes: new Map(),
+        // Enchères retirées de la liste par l'utilisateur : id -> date (masquage local uniquement).
+        dismissed: logic.normalizeDismissed(readLocalValue(DISMISSED_KEY)),
         lastAttempt: new Map(),
         // Écart horloge serveur - horloge locale (ms), estimé via l'en-tête Date de l'API.
         skewMs: 0
@@ -99,27 +96,6 @@
 
 .wm-bids-auto-btn:hover {
   border-color: rgba(52, 211, 153, 0.5);
-}
-
-.wm-bids-auto-btn.wm-bids-hide {
-  margin-left: auto;
-  opacity: 0.7;
-}
-
-.wm-bids-auto-btn.wm-bids-hide:hover {
-  opacity: 1;
-  border-color: rgba(248, 113, 113, 0.55);
-  color: #f87171;
-}
-
-.wm-bids-unhide {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
 }
 
 .wm-bids-auto-btn.is-primary {
@@ -236,9 +212,48 @@
   cursor: pointer;
 }
 
+.wm-bids-actions {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.wm-bids-remove,
+.wm-bids-restore {
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.72rem;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.wm-bids-remove:hover,
+.wm-bids-restore:hover {
+  opacity: 1;
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+.wm-bids-restore {
+  justify-self: center;
+}
+
 @media (max-width: 640px) {
   .wm-bids-row {
     grid-template-columns: 42px minmax(0, 1fr) 96px;
+  }
+
+  .wm-bids-actions {
+    grid-column: 3;
+    grid-row: 1 / span 3;
+  }
+
+  .wm-bids-actions .wm-bids-bid {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 `;
@@ -365,7 +380,7 @@
 
       function checkAlerts() {
         if (state.soundOn && !audioRunning()) return;
-        const fresh = alerts.collect(visibleBids(), serverNow());
+        const fresh = alerts.collect(logic.visibleBids(state.bids, state.dismissed), serverNow());
         if (fresh.length && state.soundOn) playUrgentBeep();
       }
 
@@ -429,7 +444,11 @@
           }
           state.userId = logic.parseUserIdFromCookies(document.cookie);
           forgetFinishedAutoBids(ids);
-          forgetFinishedHidden(ids);
+          const pruned = logic.pruneDismissed(state.dismissed, ids);
+          if (Object.keys(pruned).length !== Object.keys(state.dismissed).length) {
+            state.dismissed = pruned;
+            writeLocalValue(DISMISSED_KEY, state.dismissed);
+          }
           state.error = null;
           state.loaded = true;
           state.updatedAt = Date.now();
@@ -516,43 +535,6 @@
         writeLocalValue(AUTO_KEY, state.autoBids);
       }
 
-      const isHidden = (auctionId) => Object.prototype.hasOwnProperty.call(state.hidden, auctionId);
-      const visibleBids = () => state.bids.filter((bid) => !isHidden(bid.id));
-
-      function saveHidden() {
-        writeLocalValue(HIDDEN_KEY, state.hidden);
-      }
-
-      // « Ne plus suivre » : désarme et oublie l'auto-enchère, puis retire la ligne de la liste.
-      // N'a aucun effet côté WikiMasters : une mise déjà placée reste valable.
-      function hideBid(bid) {
-        const leading = logic.bidStatus(bid, state.userId) === 'leading';
-        if (leading && !window.confirm(`Tu es en tête sur « ${bid.card?.wikipedia_title || 'cette carte'} » : tu peux encore la remporter et payer ta mise. La masquer quand même ?`)) return;
-        removeAutoConfig(bid.id);
-        state.rowErrors.delete(bid.id);
-        state.hidden = { ...state.hidden, [bid.id]: Date.now() };
-        saveHidden();
-        renderAll();
-      }
-
-      function showHiddenBids() {
-        state.hidden = {};
-        saveHidden();
-        renderAll();
-      }
-
-      function forgetFinishedHidden(presentIds) {
-        let changed = false;
-        for (const id of Object.keys(state.hidden)) {
-          if (!presentIds.has(id)) {
-            const { [id]: _removed, ...rest } = state.hidden;
-            state.hidden = rest;
-            changed = true;
-          }
-        }
-        if (changed) saveHidden();
-      }
-
       function setAutoConfig(auctionId, config) {
         state.autoBids = { ...state.autoBids, [auctionId]: { ...config, updatedAt: Date.now() } };
         saveAutoBids();
@@ -626,9 +608,9 @@
         const now = serverNow();
         let needFast = false;
 
-        for (const bid of state.bids) {
+        for (const bid of logic.visibleBids(state.bids, state.dismissed)) {
           const config = state.autoBids[bid.id];
-          if (!config?.armed || isHidden(bid.id)) continue;
+          if (!config?.armed) continue;
 
           const remaining = logic.remainingMs(bid, now);
           if (remaining > 0 && remaining <= FAST_WINDOW_MS) needFast = true;
@@ -737,18 +719,7 @@
             sub.classList.remove('is-error');
           } else {
             const time = new Date(state.updatedAt).toLocaleTimeString('fr-FR');
-            const hiddenCount = state.bids.length - visibleBids().length;
-            sub.replaceChildren(document.createTextNode(
-              `${state.bids.length - hiddenCount} en cours, actualisé à ${time}`
-            ));
-            if (hiddenCount) {
-              sub.append(document.createTextNode(` • ${hiddenCount} masquée${hiddenCount > 1 ? 's' : ''} `));
-              const show = el('button', 'wm-bids-unhide', 'Réafficher');
-              show.type = 'button';
-              show.dataset.role = 'unhide';
-              show.addEventListener('click', showHiddenBids);
-              sub.append(show);
-            }
+            sub.textContent = `${state.bids.length} en cours, actualisé à ${time}`;
             sub.classList.remove('is-error');
           }
         }
@@ -804,8 +775,7 @@
           if (!state.autoDrafts.has(bid.id)) {
             state.autoDrafts.set(bid.id, {
               max: config ? String(config.max) : '',
-              // Plus de champ « Mises max » : plafond de sécurité fixe, seul le prix max se règle.
-              maxBids: String(autoLogic.MAX_BIDS_CAP)
+              maxBids: config ? (config.maxBids == null ? '' : String(config.maxBids)) : String(autoLogic.DEFAULT_MAX_BIDS)
             });
           }
           state.autoOpen.add(bid.id);
@@ -816,7 +786,7 @@
           const summary = el(
             'span',
             'wm-bids-auto-state is-armed',
-            `⚡ Auto armée : max ${formatAmount(config.max)} • ${config.placed} mise${config.placed > 1 ? 's' : ''} placée${config.placed > 1 ? 's' : ''} • à ${autoLogic.TRIGGER_MS / 1000} s de la fin`
+            `⚡ Auto armée : max ${formatAmount(config.max)} • ${config.maxBids == null ? `${config.placed} mise${config.placed > 1 ? 's' : ''} (illimité)` : `${config.placed}/${config.maxBids} mise${config.maxBids > 1 ? 's' : ''}`} • à ${autoLogic.TRIGGER_MS / 1000} s de la fin`
           );
           const off = el('button', 'wm-bids-auto-btn', 'Désarmer');
           off.type = 'button';
@@ -838,7 +808,7 @@
           return block;
         }
 
-        const draft = state.autoDrafts.get(bid.id) || { max: '', maxBids: String(autoLogic.MAX_BIDS_CAP) };
+        const draft = state.autoDrafts.get(bid.id) || { max: '', maxBids: String(autoLogic.DEFAULT_MAX_BIDS) };
         const panel = el('form', 'wm-bids-auto-panel');
         panel.dataset.role = 'auto-panel';
         // Nos messages d'erreur remplacent les bulles natives du navigateur.
@@ -863,6 +833,7 @@
         };
 
         const maxField = field('Prix max (W)', 'max', { min: String(minimum), placeholder: `≥ ${minimum}` });
+        const bidsField = field('Mises max (vide = illimité)', 'maxBids', { min: '1', placeholder: 'illimité' });
 
         const error = el('div', 'wm-bids-auto-error');
         error.dataset.role = 'auto-error';
@@ -884,7 +855,7 @@
         const help = el(
           'p',
           'wm-bids-auto-help',
-          `À ${autoLogic.TRIGGER_MS / 1000} s de la fin, si tu n’es pas en tête, mise le minimum requis (${formatAmount(minimum)} maintenant), puis recommence après chaque surenchère, jusqu’au prix max (${autoLogic.MAX_BIDS_CAP} mises au plus). Onglet à garder ouvert et visible.`
+          `À ${autoLogic.TRIGGER_MS / 1000} s de la fin, si tu n’es pas en tête, mise le minimum requis (${formatAmount(minimum)} maintenant), puis recommence après chaque surenchère, jusqu’au prix max (et au nombre de mises si tu en as fixé un). Onglet à garder ouvert et visible.`
         );
 
         panel.addEventListener('submit', (event) => {
@@ -897,7 +868,7 @@
             error.textContent = {
               'invalid-max': 'Prix max : entre un nombre entier.',
               'max-too-low': `Prix max trop bas : la prochaine mise minimale est de ${formatAmount(current ? bidAmountFor(current) : minimum)}.`,
-              'invalid-bids': `Mises max : entre un entier de 1 à ${autoLogic.MAX_BIDS_CAP}.`
+              'invalid-bids': 'Mises max : un entier ≥ 1, ou laisse vide pour illimité.'
             }[result.reason] || 'Réglage invalide.';
             error.hidden = false;
             return;
@@ -915,9 +886,28 @@
 
         const buttons = el('div', 'wm-bids-auto-buttons');
         buttons.append(arm, cancel);
-        panel.append(maxField, buttons, error, help);
+        panel.append(maxField, bidsField, buttons, error, help);
         block.append(panel);
         return block;
+      }
+
+      function dismissBid(auctionId) {
+        const bid = state.bids.find((item) => item.id === auctionId);
+        if (!bid) return;
+        const leading = logic.bidStatus(bid, state.userId) === 'leading' && logic.remainingMs(bid, serverNow()) > 0;
+        if (leading && !window.confirm('Tu es en tête sur cette enchère. Ta mise reste valable sur le site : si personne ne surenchérit, tu remporteras la carte et le montant sera débité. Retirer seulement l’enchère de cette liste ?')) return;
+
+        removeAutoConfig(auctionId);
+        state.rowErrors.delete(auctionId);
+        state.dismissed = { ...state.dismissed, [auctionId]: Date.now() };
+        writeLocalValue(DISMISSED_KEY, state.dismissed);
+        renderAll();
+      }
+
+      function restoreDismissed() {
+        state.dismissed = {};
+        writeLocalValue(DISMISSED_KEY, state.dismissed);
+        renderAll();
       }
 
       function buildRow(bid) {
@@ -963,15 +953,19 @@
         button.setAttribute('aria-label', `Miser ${formatAmount(nextAmount)} sur ${bid.card?.wikipedia_title || 'cette carte'}`);
         button.addEventListener('click', () => placeBid(bid.id));
 
-        row.append(info, price, countdown, button);
-        const autoBlock = buildAutoBlock(bid, remaining);
-        const hide = el('button', 'wm-bids-auto-btn wm-bids-hide', 'Ne plus suivre');
-        hide.type = 'button';
-        hide.dataset.role = 'hide';
-        hide.title = 'Désarme l’auto-enchère et retire cette enchère de la liste (réaffichable en haut de page).';
-        hide.addEventListener('click', () => hideBid(bid));
-        autoBlock.append(hide);
-        row.append(autoBlock);
+        // « Retirer » : masque l'enchère de la liste et désarme l'auto-enchère. Le site ne permet pas
+        // d'annuler une mise : si tu mènes, ta mise reste valable.
+        const remove = el('button', 'wm-bids-remove', 'Retirer');
+        remove.type = 'button';
+        remove.dataset.role = 'dismiss';
+        remove.title = 'Retire cette enchère de la liste et désarme l’auto-enchère. N’annule pas une mise déjà placée.';
+        remove.setAttribute('aria-label', `Retirer ${bid.card?.wikipedia_title || 'cette enchère'} de ma liste`);
+        remove.addEventListener('click', () => dismissBid(bid.id));
+
+        const actions = el('div', 'wm-bids-actions');
+        actions.append(button, remove);
+        row.append(info, price, countdown, actions);
+        row.append(buildAutoBlock(bid, remaining));
 
         const note = state.autoNotes.get(bid.id);
         if (note) row.append(el('div', 'wm-bids-auto-note', note));
@@ -993,7 +987,7 @@
         let list = content.querySelector('[data-role="list"]');
         if (!list) return;
 
-        const sorted = logic.sortBids(visibleBids(), serverNow());
+        const sorted = logic.sortBids(logic.visibleBids(state.bids, state.dismissed), serverNow());
 
         // Une ligne dont un champ a le focus n'est pas reconstruite : sinon l'actualisation
         // (toutes les 1,5 s en fin d'enchère) ferait perdre la saisie.
@@ -1016,6 +1010,13 @@
 
         const empty = content.querySelector('[data-role="empty"]');
         if (empty) empty.hidden = !(state.loaded && !state.error && !sorted.length);
+
+        const hiddenCount = logic.visibleBids(state.bids, {}).length - sorted.length;
+        const restore = content.querySelector('[data-role="dismissed"]');
+        if (restore) {
+          restore.hidden = hiddenCount <= 0;
+          restore.textContent = `${hiddenCount} enchère${hiddenCount > 1 ? 's' : ''} retirée${hiddenCount > 1 ? 's' : ''} de la liste — réafficher`;
+        }
       }
 
       function renderAll() {
@@ -1033,7 +1034,13 @@
         empty.dataset.role = 'empty';
         empty.hidden = true;
 
-        fragment.append(buildHeader(), list, empty);
+        const restore = el('button', 'wm-bids-restore', '');
+        restore.type = 'button';
+        restore.dataset.role = 'dismissed';
+        restore.hidden = true;
+        restore.addEventListener('click', restoreDismissed);
+
+        fragment.append(buildHeader(), list, empty, restore);
         return fragment;
       }
 

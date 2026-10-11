@@ -9,7 +9,6 @@
   const TRIGGER_MS = 16 * 1000;
   const COOLDOWN_MS = 1500;
   const MAX_FAILURES = 3;
-  const MAX_BIDS_CAP = 10;
   const DEFAULT_MAX_BIDS = 3;
   const CONFIG_TTL_MS = 7 * 24 * 3600 * 1000;
 
@@ -25,11 +24,13 @@
     // Valide la saisie. `nextAmount` = mise minimale actuelle.
     function validateConfig(input, nextAmount) {
       const max = Number(String(input?.max ?? '').trim());
-      const maxBids = Number(String(input?.maxBids ?? '').trim());
+      // Nombre de mises : vide = illimité (seul le prix max borne alors l'enchère automatique).
+      const bidsText = String(input?.maxBids ?? '').trim();
+      const maxBids = bidsText === '' ? null : Number(bidsText);
 
       if (!Number.isInteger(max) || max <= 0) return { ok: false, reason: 'invalid-max' };
       if (Number.isFinite(nextAmount) && max < nextAmount) return { ok: false, reason: 'max-too-low' };
-      if (!Number.isInteger(maxBids) || maxBids < 1 || maxBids > MAX_BIDS_CAP) {
+      if (maxBids !== null && (!Number.isInteger(maxBids) || maxBids < 1)) {
         return { ok: false, reason: 'invalid-bids' };
       }
 
@@ -46,7 +47,7 @@
       if (!(remainingMs > 0)) return { action: 'stop', reason: 'ended' };
       if (remainingMs > TRIGGER_MS) return { action: 'wait', reason: 'early' };
       if (leading) return { action: 'wait', reason: 'leading' };
-      if ((config.placed || 0) >= config.maxBids) return { action: 'stop', reason: 'bids-exhausted' };
+      if (config.maxBids != null && (config.placed || 0) >= config.maxBids) return { action: 'stop', reason: 'bids-exhausted' };
       if ((config.failures || 0) >= MAX_FAILURES) return { action: 'stop', reason: 'errors' };
       if (!Number.isFinite(nextAmount) || nextAmount <= 0) return { action: 'wait', reason: 'unknown-price' };
       if (nextAmount > config.max) return { action: 'stop', reason: 'max-reached' };
@@ -67,9 +68,10 @@
 
       for (const [id, value] of Object.entries(raw)) {
         const max = Number(value?.max);
-        const maxBids = Number(value?.maxBids);
+        const unlimited = value?.maxBids == null || value?.maxBids === '';
+        const maxBids = unlimited ? null : Number(value.maxBids);
         if (!id || !Number.isInteger(max) || max <= 0) continue;
-        if (!Number.isInteger(maxBids) || maxBids < 1 || maxBids > MAX_BIDS_CAP) continue;
+        if (!unlimited && (!Number.isInteger(maxBids) || maxBids < 1)) continue;
         if (now - Number(value.updatedAt || 0) > CONFIG_TTL_MS) continue;
 
         out[id] = {
@@ -90,7 +92,6 @@
       TRIGGER_MS,
       COOLDOWN_MS,
       MAX_FAILURES,
-      MAX_BIDS_CAP,
       DEFAULT_MAX_BIDS,
       STOP_MESSAGES,
       validateConfig,

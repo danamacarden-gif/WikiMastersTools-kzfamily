@@ -207,3 +207,13 @@ test('parseAccessTokenFromCookies lit access_token (3 segments) et refuse le res
   assert.equal(logic.parseAccessTokenFromCookies(cookieFor({ user: { id: USER } })), null);
   assert.equal(logic.parseAccessTokenFromCookies(''), null);
 });
+
+test('enchères retirées : normalisation, purge et filtre', () => {
+  const logic = require('../features/my-bids-logic.js').create();
+  assert.deepEqual(logic.normalizeDismissed({ a: 5, b: 'x', '': 3, c: '7' }), { a: 5, c: 7 });
+  assert.deepEqual(logic.normalizeDismissed(null), {});
+  assert.deepEqual(logic.normalizeDismissed([1, 2]), {});
+  assert.deepEqual(logic.pruneDismissed({ a: 1, b: 2 }, new Set(['b', 'z'])), { b: 2 });
+  assert.deepEqual(logic.visibleBids([{ id: 'a' }, { id: 'b' }], { a: 1 }).map((b) => b.id), ['b']);
+  assert.deepEqual(logic.visibleBids(null, {}), []);
+});

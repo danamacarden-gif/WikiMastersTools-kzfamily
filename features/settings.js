@@ -24,7 +24,7 @@
         mySales: true,
         bulkDiscard: true,
         sellIdeas: true,
-        saleQueue: true,
+        saleQueue: false,
         compactMode: true,
         packRecap: true,
         pullStats: true,

@@ -145,3 +145,17 @@ test('À vendre : câblé (logique, modale, page) dans bootstrap, manifest, cont
   assert.ok(read('features/app.js').includes('runtime.sellIdeas.render()'));
   assert.ok(read('features/settings.js').includes("sellIdeas: true"));
 });
+
+test('File de ventes : câblée, créée après listAuction et sellIdeas, désactivée par défaut', () => {
+  const content = read('content.js');
+  const at = (n) => content.indexOf(`runtime.${n} = featureRegistry.${n}.create`);
+  assert.ok(at('saleQueueLogic') > at('listAuction') && at('saleQueue') > at('saleQueueLogic') && at('saleQueue') < at('app'));
+  assert.match(content, /'saleQueueLogic',\s*'saleQueue'/);
+  const manifest = read('manifest.json');
+  const paths = bootstrapPaths();
+  for (const file of ['features/sale-queue-logic.js', 'features/sale-queue.js']) {
+    assert.ok(paths.includes(file), `${file} absent de bootstrap.js`);
+    assert.ok(manifest.includes(`"${file}"`), `${file} absent du manifest`);
+  }
+  assert.match(read('features/settings.js'), /saleQueue: false/);
+});
