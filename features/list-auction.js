@@ -40,7 +40,9 @@
 
     async function fetchSlots() {
       try {
-        const response = await fetch('/api/marketplace/mine', { credentials: 'include' });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 6000);
+        const response = await fetch('/api/marketplace/mine', { credentials: 'include', signal: controller.signal }).finally(() => clearTimeout(timer));
         if (!response.ok) return null;
         return logic.slots(await response.json());
       } catch (_) {
@@ -144,6 +146,11 @@
       const go = el('button', 'wm-la-go', 'Lancer l’enchère'); go.type = 'button';
       actions.append(cancel, go);
 
+      // Tant que les places ne sont pas connues, le bouton est inactif : un clic trop tôt partait en
+      // création, échouait sans réaction visible puis affichait « Limite atteinte ».
+      const checking = !!queue;
+      if (checking) { go.disabled = true; go.textContent = 'Vérification des places…'; }
+
       const setMsg = (text, kind) => { msg.textContent = text; msg.className = `wm-la-msg${kind ? ` is-${kind}` : ''}`; };
 
       // Places pleines : la modale propose la file d'attente au lieu d'échouer.
@@ -234,7 +241,7 @@
           actions.append(done);
         } catch (error) {
           // Échec : rien n'est marqué comme listé, l'utilisateur peut corriger et réessayer.
-          if (queue && /maximum|simultan/i.test(error.message)) {
+          if (queue && /maximum|simultan|limite|actives/i.test(error.message)) {
             enterQueueMode();
           } else {
             setMsg(`Échec : ${error.message}`, 'error');
@@ -252,7 +259,9 @@
       amount.focus(); amount.select();
 
       fetchSlots().then((slots) => {
-        if (!slots || !overlay.isConnected) return;
+        if (!overlay.isConnected) return;
+        if (checking && !state.queueMode && !busy) { go.disabled = false; go.textContent = 'Lancer l’enchère'; }
+        if (!slots) return;
         slotsLine.textContent = `Enchères actives : ${slots.used}/${slots.max}`;
         if (slots.full) {
           if (queue) enterQueueMode();
