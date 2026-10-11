@@ -448,7 +448,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
       function buildContent() {
         const nodes = [];
         const head = el('div');
-        head.append(el('h1', '', 'À vendre'), el('p', 'wm-sell-sub', 'Repère les cartes les plus rentables : celles qui se vendent bien plus cher que la normale de leur rareté. Rien n’est vendu automatiquement.'));
+        head.append(el('h1', '', 'À vendre'), el('p', 'wm-sell-sub', 'Repère les cartes les plus rentables : celles qui se vendent bien plus cher que la normale de leur rareté. Si tes places d’enchères sont pleines, « Vendre » met la carte en file d’attente (onglet File d’attente de Mes ventes).'));
         nodes.push(head);
         if (!state.data) computeData();
         const { data } = state;

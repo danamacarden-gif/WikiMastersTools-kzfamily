@@ -26,7 +26,7 @@
       let lastEvent = '';
 
       const read = () => logic.normalizeStore(readLocalValue(STORE_KEY));
-      const enabled = () => runtime.settings.isEnabled(SETTING_KEY);
+      const enabled = () => true; // toujours actif : la pause se règle dans l’onglet File d’attente
 
       function write(store) {
         writeLocalValue(STORE_KEY, store);

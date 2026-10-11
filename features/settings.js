@@ -81,7 +81,6 @@
           items: [
             ['bulkDiscard', 'Afficher la page Défausser en masse', 'Ajoute Défausser au menu latéral : défausse en une fois les cartes d’une rareté sous une valeur de marché donnée, hors favoris, étiquettes, familles et échanges en cours. Action irréversible, avec aperçu et confirmation.'],
             ['sellIdeas', 'Afficher la page À vendre', 'Ajoute À vendre au menu latéral : classe tes cartes par valeur de marché pour repérer ce qui vaut la peine d’être vendu, puis ouvre la modale de mise aux enchères.'],
-            ['saleQueue', 'File de ventes automatique', 'Quand tes places d’enchères sont pleines, « Vendre » met la carte en file d’attente avec son prix et sa durée : elle part toute seule dès qu’une place se libère, tant qu’un onglet WikiMasters reste ouvert. File visible dans Mes ventes.']
           ]
         },
         {
