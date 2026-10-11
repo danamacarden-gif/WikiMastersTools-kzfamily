@@ -24,15 +24,11 @@
     // Valide la saisie. `nextAmount` = mise minimale actuelle.
     function validateConfig(input, nextAmount) {
       const max = Number(String(input?.max ?? '').trim());
-      // Nombre de mises : vide = illimité (seul le prix max borne alors l'enchère automatique).
-      const bidsText = String(input?.maxBids ?? '').trim();
-      const maxBids = bidsText === '' ? null : Number(bidsText);
+      // Pas de limite sur le nombre de mises : seul le prix max borne l'enchère automatique.
+      const maxBids = null;
 
       if (!Number.isInteger(max) || max <= 0) return { ok: false, reason: 'invalid-max' };
       if (Number.isFinite(nextAmount) && max < nextAmount) return { ok: false, reason: 'max-too-low' };
-      if (maxBids !== null && (!Number.isInteger(maxBids) || maxBids < 1)) {
-        return { ok: false, reason: 'invalid-bids' };
-      }
 
       return {
         ok: true,
@@ -68,10 +64,8 @@
 
       for (const [id, value] of Object.entries(raw)) {
         const max = Number(value?.max);
-        const unlimited = value?.maxBids == null || value?.maxBids === '';
-        const maxBids = unlimited ? null : Number(value.maxBids);
+        const maxBids = null; // anciennes limites de mises ignorées
         if (!id || !Number.isInteger(max) || max <= 0) continue;
-        if (!unlimited && (!Number.isInteger(maxBids) || maxBids < 1)) continue;
         if (now - Number(value.updatedAt || 0) > CONFIG_TTL_MS) continue;
 
         out[id] = {

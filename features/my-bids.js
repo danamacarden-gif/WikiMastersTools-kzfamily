@@ -774,8 +774,7 @@
         const openPanel = () => {
           if (!state.autoDrafts.has(bid.id)) {
             state.autoDrafts.set(bid.id, {
-              max: config ? String(config.max) : '',
-              maxBids: config ? (config.maxBids == null ? '' : String(config.maxBids)) : String(autoLogic.DEFAULT_MAX_BIDS)
+              max: config ? String(config.max) : ''
             });
           }
           state.autoOpen.add(bid.id);
@@ -786,7 +785,7 @@
           const summary = el(
             'span',
             'wm-bids-auto-state is-armed',
-            `⚡ Auto armée : max ${formatAmount(config.max)} • ${config.maxBids == null ? `${config.placed} mise${config.placed > 1 ? 's' : ''} (illimité)` : `${config.placed}/${config.maxBids} mise${config.maxBids > 1 ? 's' : ''}`} • à ${autoLogic.TRIGGER_MS / 1000} s de la fin`
+            `⚡ Auto armée : max ${formatAmount(config.max)} • ${config.placed} mise${config.placed > 1 ? 's' : ''} • à ${autoLogic.TRIGGER_MS / 1000} s de la fin`
           );
           const off = el('button', 'wm-bids-auto-btn', 'Désarmer');
           off.type = 'button';
@@ -808,7 +807,7 @@
           return block;
         }
 
-        const draft = state.autoDrafts.get(bid.id) || { max: '', maxBids: String(autoLogic.DEFAULT_MAX_BIDS) };
+        const draft = state.autoDrafts.get(bid.id) || { max: '' };
         const panel = el('form', 'wm-bids-auto-panel');
         panel.dataset.role = 'auto-panel';
         // Nos messages d'erreur remplacent les bulles natives du navigateur.
@@ -833,7 +832,6 @@
         };
 
         const maxField = field('Prix max (W)', 'max', { min: String(minimum), placeholder: `≥ ${minimum}` });
-        const bidsField = field('Mises max (vide = illimité)', 'maxBids', { min: '1', placeholder: 'illimité' });
 
         const error = el('div', 'wm-bids-auto-error');
         error.dataset.role = 'auto-error';
@@ -855,7 +853,7 @@
         const help = el(
           'p',
           'wm-bids-auto-help',
-          `À ${autoLogic.TRIGGER_MS / 1000} s de la fin, si tu n’es pas en tête, mise le minimum requis (${formatAmount(minimum)} maintenant), puis recommence après chaque surenchère, jusqu’au prix max (et au nombre de mises si tu en as fixé un). Onglet à garder ouvert et visible.`
+          `À ${autoLogic.TRIGGER_MS / 1000} s de la fin, si tu n’es pas en tête, mise le minimum requis (${formatAmount(minimum)} maintenant), puis recommence après chaque surenchère, jusqu’au prix max. Onglet à garder ouvert et visible.`
         );
 
         panel.addEventListener('submit', (event) => {
@@ -867,8 +865,7 @@
           if (!result.ok) {
             error.textContent = {
               'invalid-max': 'Prix max : entre un nombre entier.',
-              'max-too-low': `Prix max trop bas : la prochaine mise minimale est de ${formatAmount(current ? bidAmountFor(current) : minimum)}.`,
-              'invalid-bids': 'Mises max : un entier ≥ 1, ou laisse vide pour illimité.'
+              'max-too-low': `Prix max trop bas : la prochaine mise minimale est de ${formatAmount(current ? bidAmountFor(current) : minimum)}.`
             }[result.reason] || 'Réglage invalide.';
             error.hidden = false;
             return;
@@ -886,7 +883,7 @@
 
         const buttons = el('div', 'wm-bids-auto-buttons');
         buttons.append(arm, cancel);
-        panel.append(maxField, bidsField, buttons, error, help);
+        panel.append(maxField, buttons, error, help);
         block.append(panel);
         return block;
       }

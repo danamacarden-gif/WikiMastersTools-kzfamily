@@ -8,22 +8,17 @@ const base = (over = {}) => ({
   config: armed(), remainingMs: 10000, leading: false, nextAmount: 11, balance: 500, now: 100000, lastAttemptAt: 0, ...over
 });
 
-test('validateConfig : accepte un plafond entier ≥ mise minimale et 1..10 mises', () => {
+test('validateConfig : seul le prix max compte, aucun nombre de mises', () => {
   const ok = logic.validateConfig({ max: '50', maxBids: '3' }, 11);
   assert.equal(ok.ok, true);
-  assert.deepEqual({ max: ok.config.max, maxBids: ok.config.maxBids, armed: ok.config.armed, placed: ok.config.placed }, { max: 50, maxBids: 3, armed: true, placed: 0 });
-
-  assert.equal(logic.validateConfig({ max: '11', maxBids: 1 }, 11).ok, true);
-  assert.equal(logic.validateConfig({ max: 10, maxBids: 1 }, 11).reason, 'max-too-low');
-  assert.equal(logic.validateConfig({ max: '', maxBids: 1 }, 11).reason, 'invalid-max');
-  assert.equal(logic.validateConfig({ max: 12.5, maxBids: 1 }, 11).reason, 'invalid-max');
-  assert.equal(logic.validateConfig({ max: -4, maxBids: 1 }, 11).reason, 'invalid-max');
-  assert.equal(logic.validateConfig({ max: 50, maxBids: 0 }, 11).reason, 'invalid-bids');
-  assert.equal(logic.validateConfig({ max: 50, maxBids: 11 }, 11).ok, true, 'plus de plafond à 10');
-  assert.equal(logic.validateConfig({ max: 50, maxBids: 500 }, 11).config.maxBids, 500);
-  assert.equal(logic.validateConfig({ max: 50, maxBids: '' }, 11).config.maxBids, null, 'vide = illimité');
-  assert.equal(logic.validateConfig({ max: 50, maxBids: 2.5 }, 11).reason, 'invalid-bids');
-  assert.equal(logic.validateConfig({ max: 50, maxBids: 'x' }, 11).reason, 'invalid-bids');
+  assert.equal(ok.config.maxBids, null, 'nombre de mises ignoré');
+  assert.equal(ok.config.max, 50);
+  assert.equal(logic.validateConfig({ max: 50 }, 11).config.maxBids, null);
+  assert.equal(logic.validateConfig({ max: '11' }, 11).ok, true);
+  assert.equal(logic.validateConfig({ max: 10 }, 11).reason, 'max-too-low');
+  assert.equal(logic.validateConfig({ max: '' }, 11).reason, 'invalid-max');
+  assert.equal(logic.validateConfig({ max: 12.5 }, 11).reason, 'invalid-max');
+  assert.equal(logic.validateConfig({ max: -4 }, 11).reason, 'invalid-max');
 });
 
 test('decide : rien tant que la config n\'est pas armée', () => {
@@ -108,7 +103,8 @@ test('normalizeStore : écarte l\'invalide et l\'ancien, garde le reste', () => 
     bad3: null
   }, now);
 
-  assert.deepEqual(Object.keys(store).sort(), ['big', 'free', 'ok']);
+  assert.deepEqual(Object.keys(store).sort(), ['bad2', 'big', 'free', 'ok']);
+  assert.equal(store.big.maxBids, null, 'anciennes limites ignorées');
   assert.equal(store.free.maxBids, null);
   assert.equal(store.ok.armed, true);
   assert.equal(store.ok.placed, 1);
