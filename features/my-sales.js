@@ -108,9 +108,11 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 .wm-hist-sort { display: flex; align-items: center; gap: 6px; font-size: .8rem; opacity: .85; }
 .wm-hist-sort select { background: var(--color-surface, #111114); color: inherit; border: 1px solid var(--color-border, rgba(255,255,255,.16)); border-radius: 8px; padding: 4px 8px; font: inherit; }
 .wm-hist-list { display: grid; border: 1px solid var(--color-border, rgba(255,255,255,.12)); border-radius: 12px; overflow: hidden; }
-.wm-hist-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) 96px 104px 112px; align-items: center; gap: 10px; padding: 8px 12px; font-size: .85rem; border-top: 1px solid var(--color-border, rgba(255,255,255,.08)); border-left: 3px solid transparent; }
+.wm-hist-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) 96px 104px 112px 112px; align-items: center; gap: 10px; padding: 8px 12px; font-size: .85rem; border-top: 1px solid var(--color-border, rgba(255,255,255,.08)); border-left: 3px solid transparent; }
 .wm-hist-row:first-child { border-top: 0; }
 .wm-hist-row:nth-child(even) { background: rgba(255,255,255,.025); }
+.wm-hist-relist-btn { padding: 4px 8px; font-size: .75rem; border-radius: 8px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: transparent; color: inherit; cursor: pointer; white-space: nowrap; }
+.wm-hist-relist-btn:hover { border-color: #34d399; color: #34d399; }
 .wm-hist-row.is-sold { border-left-color: #34d399; }
 .wm-hist-row.is-unsold { border-left-color: #6b7280; }
 .wm-hist-row.is-unsold .wm-hist-name, .wm-hist-row.is-cancelled .wm-hist-name { opacity: .8; }
@@ -517,7 +519,27 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         const date = el('div', 'wm-hist-date', item._endedAt ? dateTimeFormat.format(item._endedAt) : '—');
         const pill = el('span', `wm-hist-status is-${status}`, STATUS_LABELS[status] || status);
 
-        row.append(badgeCell, name, price, date, pill);
+        const action = el('div', 'wm-hist-action');
+        const catalogueId = item.card?.id ?? item.card?.card_id ?? item.card_id ?? null;
+        if (runtime.listAuction?.open && catalogueId) {
+          const again = el('button', 'wm-hist-relist-btn', 'Remettre en vente');
+          again.type = 'button';
+          again.dataset.role = 'history-relist';
+          again.addEventListener('click', () => {
+            const sold = logic.soldPrice(item);
+            const start = logic.startPrice(item);
+            runtime.listAuction.open({
+              cardId: String(catalogueId),
+              ownedCardId: null,
+              title: item.card?.wikipedia_title || 'Carte',
+              rarity: logic.rarityOf(item),
+              average: Number.isFinite(sold) ? sold : (Number.isFinite(start) ? start : null)
+            });
+          });
+          action.append(again);
+        }
+
+        row.append(badgeCell, name, price, date, pill, action);
         return row;
       }
 
@@ -536,7 +558,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         const table = el('div', 'wm-hist-list');
         table.dataset.role = 'history-list';
         const head = el('div', 'wm-hist-row wm-hist-head');
-        head.append(el('span', '', ''), el('span', '', 'Carte'), el('span', '', 'Prix'), el('span', '', 'Fin'), el('span', '', 'Statut'));
+        head.append(el('span', '', ''), el('span', '', 'Carte'), el('span', '', 'Prix'), el('span', '', 'Fin'), el('span', '', 'Statut'), el('span', '', ''));
         head.children[2].style.textAlign = 'right';
         head.children[3].style.textAlign = 'right';
         head.children[4].style.justifySelf = 'end';
