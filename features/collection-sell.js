@@ -14,8 +14,8 @@
       const CSS = `
 #${SORT_ID} { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: transparent; color: inherit; font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
 #${SORT_ID}.is-on { border-color: #34d399; color: #34d399; background: rgba(52,211,153,.12); }
-.wm-sell-card-actions { position: absolute; z-index: 5; display: flex; gap: 4px; box-sizing: border-box; padding: 0 4px; pointer-events: auto; }
-.wm-sell-card-actions > button { flex: 1 1 0; min-width: 0; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: rgba(0,0,0,.35); color: inherit; font: inherit; font-size: .7rem; font-weight: 600; line-height: 1.4; cursor: pointer; white-space: nowrap; }
+.wm-sell-card-actions { position: absolute; z-index: 5; display: flex; gap: 10px; box-sizing: border-box; padding: 0 14px; pointer-events: auto; }
+.wm-sell-card-actions > button { flex: 1 1 0; min-width: 0; padding: 3px 8px; border-radius: 8px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: rgba(0,0,0,.35); color: inherit; font: inherit; font-size: .7rem; font-weight: 600; line-height: 1.4; cursor: pointer; white-space: nowrap; }
 .wm-sell-card-actions > button:hover { border-color: #34d399; color: #34d399; }
 .wm-sell-card-actions > .wm-discard-card-btn:hover { border-color: #f87171; color: #f87171; }
 .wm-sell-card-actions > button:disabled { opacity: .5; cursor: default; }
@@ -157,7 +157,7 @@
         if (!r.width) { bar.style.display = 'none'; return; }
         bar.style.display = 'flex';
         bar.style.left = `${Math.round(r.left - c.left + container.scrollLeft)}px`;
-        bar.style.top = `${Math.round(r.bottom - c.top + container.scrollTop + 3)}px`;
+        bar.style.top = `${Math.round(r.bottom - c.top + container.scrollTop + 10)}px`;
         bar.style.width = `${Math.round(r.width)}px`;
       }
 
@@ -204,6 +204,14 @@
         bar.append(button, discard);
 
         if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
+        // De l'air sous chaque rangée : la barre (≈ 26 px) doit tenir sans toucher la rangée suivante.
+        if (!container.dataset.wmGap) {
+          container.dataset.wmGap = '1';
+          const style = getComputedStyle(container);
+          const gap = parseFloat(style.rowGap) || 0;
+          if (gap < 56) container.style.rowGap = '56px';
+          container.style.paddingBottom = `${Math.max(parseFloat(style.paddingBottom) || 0, 40)}px`;
+        }
         container.append(bar);
         bars.set(card, bar);
         positionBar(card, bar);
@@ -215,6 +223,7 @@
           document.getElementById(SORT_ID)?.remove();
           document.querySelectorAll('.wm-sell-card-actions').forEach((node) => node.remove());
           bars.clear();
+          document.querySelectorAll('[data-wm-gap]').forEach((node) => { node.style.rowGap = ''; node.style.paddingBottom = ''; delete node.dataset.wmGap; });
           applySort();
           return;
         }
