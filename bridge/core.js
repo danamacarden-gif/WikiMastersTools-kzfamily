@@ -43,7 +43,7 @@
       function pickDescription(card) {
         if (!card || typeof card !== 'object') return null;
         for (const key of ['description', 'wikipedia_description', 'short_description', 'wikidata_description', 'subtitle', 'wikipedia_extract', 'extract', 'summary']) {
-          if (typeof card[key] === 'string' && card[key].trim()) return card[key].trim().slice(0, 240);
+          if (typeof card[key] === 'string' && card[key].trim()) return card[key].trim().slice(0, 160);
         }
         const skip = new Set(['id', 'wikipedia_title', 'title', 'wikipedia_url', 'image_url', 'rarity']);
         for (const [key, value] of Object.entries(card)) {
@@ -51,7 +51,7 @@
           const text = value.trim();
           if (text.length < 8 || text.length > 600 || !/\s/.test(text)) continue;
           if (/^https?:\/\//i.test(text) || /^\d{4}-\d{2}-\d{2}/.test(text) || /^[0-9a-f-]{32,}$/i.test(text)) continue;
-          return text.slice(0, 240);
+          return text.slice(0, 160);
         }
         return null;
       }

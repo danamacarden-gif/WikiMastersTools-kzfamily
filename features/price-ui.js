@@ -185,7 +185,8 @@
 
           if (isCacheEntryValid(entry, now)) {
             cacheMemory.set(card.id, entry);
-          } else {
+          } else if (!isCacheEntryValid(cacheMemory.get(card.id), now)) {
+            // Un prix encore valide en mémoire est gardé même si le stockage ne l'a pas (stockage plein).
             cacheMemory.delete(card.id);
           }
         }

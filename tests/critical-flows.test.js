@@ -545,3 +545,28 @@ test('la barre des paquets masque le compteur au repos et n’offre ni arrêt ni
   assert.equal(h.button('Revoir le dernier récap'),undefined);
   assert.equal(h.document.querySelectorAll('.wm-open-all-progress')[0].hidden,true);
 });
+
+test('stockage plein : les données reconstituables sont évincées et le prix est bien enregistré', () => {
+  const data = new Map();
+  let capacity = 3; // nombre d'entrées maximum
+  const storage = {
+    get length() { return data.size; },
+    key: (i) => [...data.keys()][i] ?? null,
+    getItem: (k) => data.get(k) ?? null,
+    removeItem: (k) => data.delete(k),
+    setItem(k, v) {
+      if (!data.has(k) && data.size >= capacity) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+      data.set(k, String(v));
+    }
+  };
+  const h = harness(['features/core.js'], { localStorage: storage });
+  const core = h.window.__wmAverageFeatures.core.create();
+  const old = (fetchedAt, ok = true) => JSON.stringify({ ok, fetchedAt, averages: {} });
+  data.set('wm_missing_img_v2_a', '{}');
+  data.set('wm_avg_v4_old', old(1));
+  data.set('wm_all_collection_v1', '{"cards":[]}');
+  assert.equal(core.writeLocalValue('wm_avg_v4_new', { ok: true, fetchedAt: 5, averages: { C: 3 } }), true);
+  assert.ok(data.has('wm_avg_v4_new'), 'nouveau prix enregistré');
+  assert.ok(data.has('wm_all_collection_v1'), 'la collection n’est jamais évincée');
+  assert.ok(!data.has('wm_missing_img_v2_a'), 'images reconstituables évincées d’abord');
+});

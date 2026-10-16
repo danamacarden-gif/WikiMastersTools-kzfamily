@@ -101,12 +101,58 @@
         }
       }
 
+      // localStorage est limité (~5 Mo, partagé avec le site). Plein, l'écriture échouait en silence :
+      // les prix restaient en mémoire vive puis étaient redemandés à chaque changement de page.
+      // On libère alors de la place sur les données reconstituables (images, erreurs, vieux prix), puis on réessaie.
+      let quotaWarned = false;
+
+      function isQuotaError(error) {
+        return error?.name === 'QuotaExceededError' || error?.code === 22 || error?.code === 1014;
+      }
+
+      function evictForSpace(step) {
+        const groups = [[], [], []];
+        for (let index = 0; index < localStorage.length; index += 1) {
+          const key = localStorage.key(index);
+          if (!key) continue;
+          if (key.startsWith(MISSING_IMAGE_CACHE_PREFIX)) { groups[0].push([key, 0]); continue; }
+          if (!key.startsWith(CACHE_PREFIX)) continue;
+          const entry = readLocalValue(key);
+          if (entry && entry.ok === false) groups[1].push([key, 0]);
+          else groups[2].push([key, Number(entry?.fetchedAt) || 0]);
+        }
+        let victims;
+        if (step === 0) victims = groups[0];
+        else if (step === 1) victims = groups[1];
+        else victims = groups[2].sort((a, b) => a[1] - b[1]).slice(0, Math.max(50, Math.ceil(groups[2].length * 0.2)));
+        victims.forEach(([key]) => localStorage.removeItem(key));
+        return victims.length;
+      }
+
       function writeLocalValue(key, value) {
+        const text = JSON.stringify(value);
         try {
-          localStorage.setItem(key, JSON.stringify(value));
+          localStorage.setItem(key, text);
           return true;
         } catch (error) {
-          console.warn('[WM Average] localStorage indisponible', error);
+          if (!isQuotaError(error)) {
+            console.warn('[WM Average] localStorage indisponible', error);
+            return false;
+          }
+          if (!quotaWarned) {
+            quotaWarned = true;
+            console.warn('[WM Average] stockage du navigateur plein : nettoyage automatique des données reconstituables');
+          }
+          for (let step = 0; step < 3; step += 1) {
+            try {
+              if (!evictForSpace(step)) continue;
+              localStorage.setItem(key, text);
+              return true;
+            } catch (retryError) {
+              if (!isQuotaError(retryError)) return false;
+            }
+          }
+          console.warn('[WM Average] écriture impossible, stockage plein', key);
           return false;
         }
       }
