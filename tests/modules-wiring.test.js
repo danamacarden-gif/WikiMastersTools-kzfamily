@@ -159,3 +159,13 @@ test('File de ventes : câblée, créée après listAuction et sellIdeas, activ�
   }
   assert.match(read('features/settings.js'), /saleQueue: true/);
 });
+
+test('Collection : tri par prix + bouton Vendre câblés', () => {
+  const content = read('content.js');
+  assert.match(content, /'saleQueue',\s*'collectionSell',\s*'app'/);
+  assert.ok(content.indexOf('runtime.collectionSell = featureRegistry.collectionSell.create') > content.indexOf('runtime.saleQueue = '));
+  assert.ok(bootstrapPaths().includes('features/collection-sell.js'));
+  assert.ok(read('manifest.json').includes('"features/collection-sell.js"'));
+  assert.ok(read('features/app.js').includes('runtime.collectionSell.render()'));
+  assert.match(read('features/settings.js'), /collectionSell: true/);
+});

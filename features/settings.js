@@ -24,6 +24,7 @@
         mySales: true,
         bulkDiscard: true,
         sellIdeas: true,
+        collectionSell: true,
         saleQueue: true,
         compactMode: true,
         packRecap: true,
@@ -80,6 +81,7 @@
           description: 'Outils de gestion de ta collection.',
           items: [
             ['bulkDiscard', 'Afficher la page Défausser en masse', 'Ajoute Défausser au menu latéral : défausse en une fois les cartes d’une rareté sous une valeur de marché donnée, hors favoris, étiquettes, familles et échanges en cours. Action irréversible, avec aperçu et confirmation.'],
+            ['collectionSell', 'Collection : tri par prix et bouton Vendre', 'Ajoute dans la Collection un tri par prix décroissant (sur les prix chargés) et un bouton Vendre sous chaque carte (enchère directe, ou file d’attente si tes places sont pleines).'],
             ['sellIdeas', 'Afficher la page À vendre', 'Ajoute À vendre au menu latéral : classe tes cartes par valeur de marché pour repérer ce qui vaut la peine d’être vendu, puis ouvre la modale de mise aux enchères.'],
           ]
         },

@@ -200,6 +200,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       'features/list-auction.js',
       'features/sale-queue-logic.js',
       'features/sale-queue.js',
+      'features/collection-sell.js',
       'features/app.js',
       'content.js'
     ];

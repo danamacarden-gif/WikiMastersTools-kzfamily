@@ -35,6 +35,7 @@
     'sellIdeas',
     'saleQueueLogic',
     'saleQueue',
+    'collectionSell',
     'app'
   ];
 
@@ -130,6 +131,7 @@
   runtime.sellIdeas = featureRegistry.sellIdeas.create(runtime);
   runtime.saleQueueLogic = featureRegistry.saleQueueLogic.create();
   runtime.saleQueue = featureRegistry.saleQueue.create(runtime);
+  runtime.collectionSell = featureRegistry.collectionSell.create(runtime);
   runtime.app = featureRegistry.app.create(runtime);
 
   runtime.app.startObserver();
