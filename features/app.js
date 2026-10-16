@@ -112,7 +112,7 @@
             '.wm-auto-open-control, .wm-auto-open-help, .wm-settings-launch, .wm-settings-modal, ' +
             '.wm-copy-card-button, .wm-trade-preview-card, #wm-theme-tracker-page, #wm-theme-tracker-nav, ' +
             '#wm-my-bids-page, #wm-my-bids-nav, #wm-my-sales-page, #wm-my-sales-nav, ' +
-            '#wm-sell-ideas-page, #wm-sell-ideas-nav, #wm-list-auction-overlay, #wm-sort-price, .wm-sell-card-btn'
+            '#wm-sell-ideas-page, #wm-sell-ideas-nav, #wm-list-auction-overlay, #wm-sort-price, .wm-sell-card-actions'
           )
         );
       }

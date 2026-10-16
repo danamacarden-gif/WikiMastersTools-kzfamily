@@ -2,7 +2,8 @@
   const registry = window.__wmAverageFeatures ||= {};
 
   // Page Collection : tri par prix décroissant (sur les prix déjà chargés) et bouton « Vendre » sous
-  // chaque carte (modale de mise aux enchères, ou file d'attente si les places sont pleines).
+  // chaque carte (modale de mise aux enchères, ou file d'attente si les places sont pleines) et bouton
+  // « Défausser » (un exemplaire, avec confirmation ; cartes protégées refusées).
   // Le tri utilise la propriété CSS `order` : on ne déplace aucun nœud du DOM de React.
   registry.collectionSell = {
     create(runtime) {
@@ -13,8 +14,11 @@
       const CSS = `
 #${SORT_ID} { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: transparent; color: inherit; font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
 #${SORT_ID}.is-on { border-color: #34d399; color: #34d399; background: rgba(52,211,153,.12); }
-.${BTN_CLASS} { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: rgba(0,0,0,.25); color: inherit; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
-.${BTN_CLASS}:hover { border-color: #34d399; color: #34d399; }`;
+.wm-sell-card-actions { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5; display: flex; gap: 6px; }
+.wm-sell-card-actions > button { flex: 1 1 0; min-width: 0; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: rgba(0,0,0,.25); color: inherit; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.wm-sell-card-actions > button:hover { border-color: #34d399; color: #34d399; }
+.wm-sell-card-actions > .wm-discard-card-btn:hover { border-color: #f87171; color: #f87171; }
+.wm-sell-card-actions > button:disabled { opacity: .5; cursor: default; }`;
 
       const { isCollectionPage, cardMetaById, cacheMemory } = runtime.core;
 
@@ -102,9 +106,45 @@
         button.title = 'Trie les cartes affichées par prix moyen décroissant (prix chargés uniquement : utilise « Charger les prix » avant).';
       }
 
-      function ensureSellButton(card) {
-        if (card.querySelector(`:scope > .${BTN_CLASS}`)) return;
+      function discardCard(card, button) {
         const id = card.dataset.wmCardId;
+        const meta = cardMetaById.get(id) || {};
+        const title = meta.title || card.querySelector('h3')?.textContent?.trim() || 'cette carte';
+        const ids = (Array.isArray(meta.ownedCardIds) ? meta.ownedCardIds : []).filter(Boolean);
+        if (!ids.length) { window.alert('Exemplaire inconnu : recharge la page Collection puis réessaie.'); return; }
+        const family = runtime.bulkDiscard?.shared?.readFamilyContext?.().familyCardIds;
+        if (meta.starred === true || (Array.isArray(meta.tags) && meta.tags.length) || family?.has?.(id)) {
+          window.alert(`« ${title} » est protégée (favori, étiquette ou famille) : elle n’est pas défaussée ici. Retire la protection d’abord.`);
+          return;
+        }
+        const url = runtime.bulkDiscardLogic?.discardUrl?.(ids[ids.length - 1]);
+        if (!url) { window.alert('Identifiant d’exemplaire invalide.'); return; }
+        const count = Math.max(1, Number(meta.count) || ids.length);
+        const rest = count > 1 ? `Il t’en restera ${count - 1}.` : 'C’est ton dernier exemplaire : la carte quitte ta collection.';
+        if (!window.confirm(`Défausser 1 exemplaire de « ${title} » ? ${rest} Action irréversible.`)) return;
+        button.disabled = true; button.textContent = 'Défausse…';
+        fetch(url, { method: 'POST', credentials: 'include', headers: { accept: '*/*' } })
+          .then(async (response) => {
+            if (!response.ok) {
+              let message = `HTTP ${response.status}`;
+              try { const body = await response.json(); message = String(body?.error || body?.message || message); } catch (_) { /* ignoré */ }
+              throw new Error(message);
+            }
+            meta.ownedCardIds = ids.slice(0, -1);
+            meta.count = count - 1;
+            button.textContent = 'Défaussée ✓';
+          })
+          .catch((error) => {
+            button.disabled = false; button.textContent = 'Défausser';
+            window.alert(`Défausse impossible : ${error.message}`);
+          });
+      }
+
+      function ensureSellButton(card) {
+        if (card.querySelector(`:scope > .wm-sell-card-actions`)) return;
+        const id = card.dataset.wmCardId;
+        const actions = document.createElement('div');
+        actions.className = 'wm-sell-card-actions';
         const button = document.createElement('button');
         button.type = 'button';
         button.className = BTN_CLASS;
@@ -123,14 +163,20 @@
           });
         });
         if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
-        card.append(button);
+        const discard = document.createElement('button');
+        discard.type = 'button';
+        discard.className = 'wm-discard-card-btn';
+        discard.textContent = 'Défausser';
+        discard.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); discardCard(card, discard); });
+        actions.append(button, discard);
+        card.append(actions);
       }
 
       function render() {
         if (!isCollectionPage() || !runtime.listAuction) return;
         if (!enabled()) {
           document.getElementById(SORT_ID)?.remove();
-          document.querySelectorAll(`.${BTN_CLASS}`).forEach((node) => node.remove());
+          document.querySelectorAll('.wm-sell-card-actions').forEach((node) => node.remove());
           applySort();
           return;
         }
