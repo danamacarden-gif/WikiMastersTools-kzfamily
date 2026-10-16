@@ -139,6 +139,10 @@
         applySort();
       }
 
+      // Les prix arrivent au fil de l'eau (badges mis à jour sans que l'app ne relance un rendu) :
+      // tant que le tri est actif, on le recalcule régulièrement.
+      setInterval(() => { if (sortOn && isCollectionPage() && enabled()) applySort(); }, 1500);
+
       return { render, applySort };
     }
   };
