@@ -44,6 +44,7 @@
         filters: {
           rarities: new Set(Array.isArray(saved.rarities) ? saved.rarities : []),
           query: String(saved.query ?? ''),
+          includeUnpriced: saved.includeUnpriced === true,
           minPrice: String(saved.minPrice ?? ''),
           minRatio: String(saved.minRatio ?? ''),
           duplicatesOnly: saved.duplicatesOnly !== false,
@@ -60,7 +61,7 @@
         try {
           const f = state.filters;
           writeLocalValue?.(SETTINGS_STORE_KEY, {
-            loadRarities: [...state.loadRarities], rarities: [...f.rarities], query: f.query, minPrice: f.minPrice,
+            loadRarities: [...state.loadRarities], rarities: [...f.rarities], query: f.query, includeUnpriced: f.includeUnpriced, minPrice: f.minPrice,
             minRatio: f.minRatio, duplicatesOnly: f.duplicatesOnly, hideProtected: f.hideProtected,
             hideListed: f.hideListed, sort: f.sort
           });
@@ -68,6 +69,7 @@
       }
 
       const CSS = `
+.wm-sell-desc { font-size: .75rem; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 .wm-sell-page { width: 100%; min-width: 0; color: var(--color-foreground, #fafafa); }
 .wm-sell-shell { width: min(960px, 100%); margin: 0 auto; padding: 24px clamp(14px, 3vw, 28px) 48px; box-sizing: border-box; display: grid; gap: 14px; }
@@ -442,7 +444,8 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         checks.append(
           check('Doublons seulement (garder 1 exemplaire)', f.duplicatesOnly, (on) => { f.duplicatesOnly = on; rerender(); }),
           check('Masquer favoris / étiquetées / familles', f.hideProtected, (on) => { f.hideProtected = on; rerender(); }),
-          check('Masquer les cartes déjà en vente', f.hideListed, (on) => { f.hideListed = on; rerender(); })
+          check('Masquer les cartes déjà en vente', f.hideListed, (on) => { f.hideListed = on; rerender(); }),
+          check('Inclure les cartes sans prix chargé', f.includeUnpriced, (on) => { f.includeUnpriced = on; rerender(); })
         );
         panel.append(row, checks);
         return panel;
@@ -458,6 +461,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 
         const info = el('div', 'wm-sell-info');
         info.append(el('div', 'wm-sell-name', item.title));
+        if (item.description) info.append(el('div', 'wm-sell-desc', item.description));
         const meta = el('div', 'wm-sell-meta');
         const badge = kit.createRarityBadge?.(item.rarity);
         if (badge) meta.append(badge);
@@ -479,8 +483,8 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           row.append(badgeRatio);
         }
         const price = el('div', 'wm-sell-price');
-        price.append(el('strong', '', `${money(item.price)} W`));
-        if (item.sellable > 1) price.append(el('small', '', `${money(item.total)} W au total`));
+        price.append(el('strong', '', item.price == null ? 'Prix ?' : `${money(item.price)} W`));
+        if (item.sellable > 1 && item.price != null) price.append(el('small', '', `${money(item.total)} W au total`));
         row.append(price);
 
         if (item.listed || runtime.listAuction.isListed(item.id)) row.append(el('span', 'wm-sell-tag', 'En vente'));
@@ -505,7 +509,12 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         if (counts.unpriced) stat(`${fmt(counts.unpriced)} sans prix chargé`, 'sell-unpriced');
         if (counts.protected) stat(`${fmt(counts.protected)} protégée${counts.protected > 1 ? 's' : ''} masquée${counts.protected > 1 ? 's' : ''}`, 'sell-protected');
         if (counts.singles) stat(`${fmt(counts.singles)} en un seul exemplaire`, 'sell-singles');
+        const withDescription = state.data.rows.filter((row) => row.description).length;
+        stat(`Descriptions lues : ${fmt(withDescription)} / ${fmt(state.data.rows.length)}`, 'sell-descriptions');
         nodes.push(stats);
+        if (state.filters.query.trim() && withDescription < state.data.rows.length * 0.5) {
+          nodes.push(el('p', 'wm-sell-note', 'La recherche ne voit que les titres pour les cartes sans description : relance « Charger les manquants » pour relire ta collection et récupérer les descriptions.'));
+        }
 
         if (!items.length) {
           nodes.push(el('p', 'wm-sell-note', 'Rien à proposer avec ces critères. Assouplis les filtres ou charge davantage de prix.'));

@@ -13,7 +13,7 @@
       const CSS = `
 #${SORT_ID} { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: transparent; color: inherit; font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
 #${SORT_ID}.is-on { border-color: #34d399; color: #34d399; background: rgba(52,211,153,.12); }
-.${BTN_CLASS} { display: block; width: calc(100% - 16px); margin: 6px 8px 8px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: rgba(0,0,0,.25); color: inherit; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.${BTN_CLASS} { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--color-border, rgba(255,255,255,.2)); background: rgba(0,0,0,.25); color: inherit; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
 .${BTN_CLASS}:hover { border-color: #34d399; color: #34d399; }`;
 
       const { isCollectionPage, cardMetaById, cacheMemory } = runtime.core;
@@ -122,6 +122,7 @@
             average
           });
         });
+        if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
         card.append(button);
       }
 

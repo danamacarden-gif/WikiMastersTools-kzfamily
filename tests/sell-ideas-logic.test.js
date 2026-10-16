@@ -110,3 +110,16 @@ test('select : recherche titre + description, sans accents ni pluriel', () => {
   assert.deepEqual(find('xyz'), []);
   assert.equal(find('').length, 3);
 });
+
+test('select : cartes sans prix incluses sur demande, en dernier, sans filtre de prix', () => {
+  const logic = require('../features/sell-ideas-logic.js').create();
+  const rows = logic.annotate(logic.buildRows([
+    { id: 'a', title: 'Aigle', description: 'espèce d’oiseaux', rarity: 'C', count: 2, ownedCardIds: ['1', '2'] },
+    { id: 'b', title: 'Zèbre', description: 'espèce d’oiseaux', rarity: 'C', count: 2, ownedCardIds: ['3', '4'] }
+  ], (id) => (id === 'b' ? 9 : null)), {});
+  assert.deepEqual(logic.select(rows, { query: 'oiseau', hideProtected: false }).items.map((i) => i.id), ['b']);
+  const withAll = logic.select(rows, { query: 'oiseau', hideProtected: false, includeUnpriced: true, minPrice: 5 });
+  assert.deepEqual(withAll.items.map((i) => i.id), ['b', 'a']);
+  assert.equal(withAll.items[1].price, null);
+  assert.equal(withAll.items[1].total, 0);
+});

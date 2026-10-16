@@ -21,7 +21,7 @@
           runtime.collectionBulk.ensureToolbar();
           runtime.collectionBulk.ensurePriceLegend();
           runtime.priceUi.renderVisibleCollectionCards();
-          runtime.collectionSell.render();
+          try { runtime.collectionSell.render(); } catch (error) { reportError('collection-vendre', error); }
         }
 
         if (isMarketplaceDetailPage()) {

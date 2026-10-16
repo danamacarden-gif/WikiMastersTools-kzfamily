@@ -38,6 +38,24 @@
         return [...byKey.values()];
       }
 
+      // Le nom du champ « description » n'est pas documenté : noms connus d'abord, puis premier texte
+      // descriptif (ni URL, ni date, ni identifiant) hors titre.
+      function pickDescription(card) {
+        if (!card || typeof card !== 'object') return null;
+        for (const key of ['description', 'wikipedia_description', 'short_description', 'wikidata_description', 'subtitle', 'wikipedia_extract', 'extract', 'summary']) {
+          if (typeof card[key] === 'string' && card[key].trim()) return card[key].trim().slice(0, 240);
+        }
+        const skip = new Set(['id', 'wikipedia_title', 'title', 'wikipedia_url', 'image_url', 'rarity']);
+        for (const [key, value] of Object.entries(card)) {
+          if (skip.has(key) || typeof value !== 'string') continue;
+          const text = value.trim();
+          if (text.length < 8 || text.length > 600 || !/\s/.test(text)) continue;
+          if (/^https?:\/\//i.test(text) || /^\d{4}-\d{2}-\d{2}/.test(text) || /^[0-9a-f-]{32,}$/i.test(text)) continue;
+          return text.slice(0, 240);
+        }
+        return null;
+      }
+
       function mapEntry(entry) {
         const card = entry && entry.card;
         const id = (entry && entry.card_id) || (card && card.id);
@@ -54,7 +72,7 @@
           imageUrl: card?.image_url || null,
           wikipediaUrl: card?.wikipedia_url || null,
           // Description courte de la carte (nom du champ non garanti côté site) : sert à la recherche.
-          description: String(card?.description || card?.wikipedia_description || card?.short_description || card?.wikipedia_extract || card?.extract || card?.summary || '').slice(0, 240) || null,
+          description: pickDescription(card),
           count: Number(entry?.count) || 1,
           starred: entry?.starred === true,
           tags: mapTags(entry?.tags)

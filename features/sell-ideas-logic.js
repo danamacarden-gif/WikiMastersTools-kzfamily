@@ -108,7 +108,7 @@
       }
     }
 
-    // Filtre + tri. Les cartes sans prix ne sont jamais proposées.
+    // Filtre + tri. Les cartes sans prix ne sont proposées que si `includeUnpriced` (elles passent en dernier).
     // opts : { rarities:Set (vide = toutes), minPrice, minRatio, duplicatesOnly, hideProtected, hideListed, sort }
     function select(annotated, opts = {}, sellingIds = new Set()) {
       const rarities = opts.rarities instanceof Set ? opts.rarities : new Set(opts.rarities || []);
@@ -124,7 +124,8 @@
           const haystack = normalizeText(`${row.title} ${row.description || ''}`);
           if (!words.every((word) => haystack.includes(word))) continue;
         }
-        if (row.price == null) { counts.unpriced += 1; continue; }
+        const unpriced = row.price == null;
+        if (unpriced && !opts.includeUnpriced) { counts.unpriced += 1; continue; }
 
         const isProtected = row.starred || row.tagCount > 0 || row.family;
         if (opts.hideProtected !== false && isProtected) { counts.protected += 1; continue; }
@@ -134,10 +135,13 @@
 
         const sellable = opts.duplicatesOnly ? row.copies - 1 : row.copies;
         if (sellable < 1) { counts.singles += 1; continue; }
-        if (row.price < minPrice) { counts.belowPrice += 1; continue; }
-        if (minRatio && !(row.ratio != null && row.ratio >= minRatio)) { counts.belowRatio += 1; continue; }
+        if (unpriced) counts.unpriced += 1;
+        else {
+          if (row.price < minPrice) { counts.belowPrice += 1; continue; }
+          if (minRatio && !(row.ratio != null && row.ratio >= minRatio)) { counts.belowRatio += 1; continue; }
+        }
 
-        items.push({ ...row, listed, protected: isProtected, sellable, total: row.price * sellable });
+        items.push({ ...row, listed, protected: isProtected, sellable, total: unpriced ? 0 : row.price * sellable });
       }
 
       // Les cartes déjà en vente restent visibles mais passent après les autres, quel que soit le tri.
