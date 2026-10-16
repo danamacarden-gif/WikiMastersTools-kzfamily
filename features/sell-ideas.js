@@ -13,6 +13,9 @@
       const ROUTE_CLASS = 'wm-sell-route';
       const SETTING_KEY = 'sellIdeas';
       const SETTINGS_STORE_KEY = 'wm_sell_ideas_v1';
+      // Carnet de prix : conserve indéfiniment les prix chargés (le cache de base expire après 24 h).
+      // Il ne change que sur demande : « Charger les manquants » ou « Tout actualiser ».
+      const PRICE_BOOK_KEY = 'wm_sell_prices_v1';
       const PAGE_SIZE = 50;
       const POLL_MS = 400;
 
@@ -38,9 +41,9 @@
         cancel: false,
         message: '',
         loadRarities: new Set(Array.isArray(saved.loadRarities) ? saved.loadRarities : ['L', 'UR', 'SR', 'R', 'PC']),
-        force: false,
         filters: {
           rarities: new Set(Array.isArray(saved.rarities) ? saved.rarities : []),
+          query: String(saved.query ?? ''),
           minPrice: String(saved.minPrice ?? ''),
           minRatio: String(saved.minRatio ?? ''),
           duplicatesOnly: saved.duplicatesOnly !== false,
@@ -57,7 +60,7 @@
         try {
           const f = state.filters;
           writeLocalValue?.(SETTINGS_STORE_KEY, {
-            loadRarities: [...state.loadRarities], rarities: [...f.rarities], minPrice: f.minPrice,
+            loadRarities: [...state.loadRarities], rarities: [...f.rarities], query: f.query, minPrice: f.minPrice,
             minRatio: f.minRatio, duplicatesOnly: f.duplicatesOnly, hideProtected: f.hideProtected,
             hideListed: f.hideListed, sort: f.sort
           });
@@ -168,10 +171,31 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
       function computeData() {
         const { cards, fetchedAt } = knownCards();
         const prices = storageGet(cards.map((card) => cacheKey(card.id)));
+        const book = { ...(storageGet(PRICE_BOOK_KEY)[PRICE_BOOK_KEY] || {}) };
+        let bookChanged = false;
+        const rarityById = new Map(cards.map((card) => [card.id, card.rarity]));
+        // Les prix frais du cache de base entrent dans le carnet (sauf s'ils sont plus anciens).
+        for (const card of cards) {
+          const cached = prices[cacheKey(card.id)];
+          if (!cached || cached.ok === false) continue;
+          const average = runtime.priceUi.chooseAverage(cached, null, card.rarity || null);
+          if (!Number.isFinite(average)) continue;
+          const at = Number(cached.fetchedAt) || Date.now();
+          const known = book[card.id];
+          if (!known || at > Number(known.at || 0) || known.average !== average) {
+            if (known && at < Number(known.at || 0)) continue;
+            book[card.id] = { average, rarity: card.rarity || null, at };
+            bookChanged = true;
+          }
+        }
+        if (bookChanged) storageSet({ [PRICE_BOOK_KEY]: book });
+        state.bookSize = Object.keys(book).length;
+        state.bookOldest = Object.values(book).reduce((min, v) => Math.min(min, Number(v.at) || Infinity), Infinity);
         const priceOf = (id, rarity) => {
-          const cached = prices[cacheKey(id)];
-          if (!cached || cached.ok === false) return null;
-          return runtime.priceUi.chooseAverage(cached, null, rarity || null);
+          const entry = book[id];
+          if (!entry || !Number.isFinite(entry.average)) return null;
+          if (rarity && entry.rarity && entry.rarity !== rarity) return null;
+          return entry.average;
         };
         const family = runtime.bulkDiscard?.shared?.readFamilyContext?.().familyCardIds || new Set();
         const rows = logic.buildRows(cards, priceOf, family);
@@ -188,11 +212,12 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
 
       // Chargement identique à « Charger les prix » : collection par raretés (pont de l'extension),
       // puis prix des cartes via le chargeur partagé (cache 24 h : un prix récent n'est pas rechargé).
-      function requestCollection(rarities, onProgress) {
+      function requestCollection(rarities, onProgress, onPage) {
         return new Promise((resolve, reject) => {
           const requestId = `sell:${Date.now()}:${Math.random().toString(36).slice(2)}`;
           const onProg = (event) => {
             if (event.detail?.requestId !== requestId) return;
+            if (Array.isArray(event.detail.cards)) onPage?.(event.detail.cards);
             onProgress(Number(event.detail.loadedPages) || 0, Number(event.detail.totalPages) || 0);
           };
           const onDone = (event) => {
@@ -201,7 +226,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
             window.removeEventListener('wm-average-all-collection', onDone);
             clearTimeout(timer);
             if (event.detail.ok) resolve(event.detail);
-            else reject(new Error(event.detail.error || 'Erreur réseau'));
+            else reject(Object.assign(new Error(event.detail.error || 'Erreur réseau'), { partial: event.detail.cards }));
           };
           const timer = setTimeout(() => {
             window.removeEventListener('wm-average-all-collection-progress', onProg);
@@ -214,6 +239,14 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
             detail: { requestId, selectedRarities: [...rarities] }
           }));
         });
+      }
+
+      // Ajoute des cartes lues à la collection connue sans jamais déclarer la lecture complète.
+      function storePartial(cards) {
+        const existing = storageGet(ALL_COLLECTION_KEY)[ALL_COLLECTION_KEY];
+        const merged = new Map((Array.isArray(existing?.cards) ? existing.cards : []).map((card) => [card.id, { ...card }]));
+        for (const card of cards) merged.set(card.id, merged.has(card.id) ? { ...merged.get(card.id), ...card } : { ...card });
+        storageSet({ [ALL_COLLECTION_KEY]: { fetchedAt: Date.now(), cards: [...merged.values()], complete: existing?.complete === true } });
       }
 
       function storeCollection(detail) {
@@ -231,20 +264,55 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         return cards;
       }
 
-      async function load() {
+      // mode : 'missing' (cartes sans prix en mémoire) ou 'all' (tout actualiser).
+      // Fusionne des pages lues pendant un même chargement : un même modèle peut revenir sur plusieurs pages,
+      // chaque page ne portant que ses exemplaires.
+      function mergePage(session, cards) {
+        for (const card of cards) {
+          if (!card?.id) continue;
+          const known = session.get(card.id);
+          if (!known) { session.set(card.id, { ...card, ownedCardIds: [...(card.ownedCardIds || [])] }); continue; }
+          const ids = new Set([...(known.ownedCardIds || []), ...(card.ownedCardIds || [])]);
+          known.ownedCardIds = [...ids];
+          known.count = Math.max(known.count || 1, card.count || 1, ids.size);
+          known.starred = Boolean(known.starred || card.starred);
+          if (!known.ownedCardId && ids.size) known.ownedCardId = [...ids][0];
+        }
+      }
+
+      async function load(mode = 'missing') {
         if (state.loading) return;
         if (!state.loadRarities.size) { state.message = 'Choisis au moins une rareté à charger.'; render(); return; }
         state.loading = true; state.cancel = false; state.message = ''; state.loadText = 'Lecture de ta collection…'; state.loadRatio = 0;
         render();
         try {
-          const detail = await requestCollection(state.loadRarities, (done, total) => {
-            setLoad(`Lecture de ta collection… page ${done}${total ? ` / ${total}` : ''}`, total ? done / total : 0);
-          });
+          // Les pages lues sont enregistrées au fil de l'eau (toutes les 3 pages) : une coupure ne les perd pas.
+          const session = new Map();
+          let sinceFlush = 0;
+          const flush = () => { if (session.size) { storePartial([...session.values()]); sinceFlush = 0; } };
+          let detail;
+          try {
+            detail = await requestCollection(state.loadRarities, (done, total) => {
+              setLoad(`Lecture de ta collection… page ${done}${total ? ` / ${total}` : ''}`, total ? done / total : 0);
+            }, (pageCards) => {
+              mergePage(session, pageCards);
+              sinceFlush += 1;
+              if (sinceFlush >= 3) flush();
+            });
+          } catch (error) {
+            if (Array.isArray(error.partial)) mergePage(session, error.partial);
+            flush();
+            error.message = `${error.message} — ${fmt(session.size)} cartes déjà lues sont enregistrées, relance pour continuer.`;
+            throw error;
+          }
           const cards = storeCollection(detail);
-          const selected = cards.filter((card) => state.loadRarities.has(card.rarity));
+          const book = storageGet(PRICE_BOOK_KEY)[PRICE_BOOK_KEY] || {};
+          const inRarities = cards.filter((card) => state.loadRarities.has(card.rarity));
+          const selected = mode === 'all' ? inRarities : inRarities.filter((card) => !Number.isFinite(book[card.id]?.average));
+          if (!selected.length) state.message = 'Rien à charger : toutes les cartes de ces raretés ont déjà un prix en mémoire.';
           if (selected.length) {
             runtime.priceLoader.loadCacheForCards(selected, {
-              forceRarities: state.force ? new Set(state.loadRarities) : null
+              forceRarities: mode === 'all' ? new Set(state.loadRarities) : null
             });
             for (;;) {
               const left = selected.filter((card) => runtime.priceLoader.isPending(card.id)).length;
@@ -296,8 +364,8 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         panel.append(chips);
         const row = el('div', 'wm-sell-row');
         row.append(
-          button(state.loading ? 'Chargement…' : 'Charger les prix', 'is-primary', load, state.loading),
-          check('Recharger même les prix récents (< 24 h)', state.force, (on) => { state.force = on; })
+          button(state.loading ? 'Chargement…' : 'Charger les manquants', 'is-primary', () => load('missing'), state.loading),
+          button('Tout actualiser', '', () => load('all'), state.loading)
         );
         if (state.loading) row.append(button('Arrêter d’attendre', '', () => { state.cancel = true; }));
         panel.append(row);
@@ -309,8 +377,11 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           bar.append(loadBar);
           panel.append(loadText, bar);
         }
-        panel.append(el('p', 'wm-sell-hint', 'Même chargement que « Charger les prix » de la collection : les prix déjà en cache (24 h) ne sont pas redemandés. Pour comparer les communes, coche aussi C : c’est long, mais c’est ce qui révèle les communes qui se vendent bien.'));
-        if (state.message) panel.append(Object.assign(el('p', 'wm-sell-note', state.message), { dataset: { kind: 'error' } }));
+        const memo = state.bookSize
+          ? `Prix en mémoire : ${fmt(state.bookSize)} cartes, conservés jusqu’à ta prochaine actualisation (le plus ancien : il y a ${humanElapsed(state.bookOldest)}). `
+          : 'Aucun prix en mémoire pour l’instant. ';
+        panel.append(el('p', 'wm-sell-hint', memo + '« Charger les manquants » ne demande que les cartes sans prix ; « Tout actualiser » redemande toutes les cartes des raretés cochées. Pour comparer les communes, coche aussi C : c’est long, mais c’est ce qui révèle les communes qui se vendent bien.'));
+        if (state.message) panel.append((() => { const note = el('p', 'wm-sell-note', state.message); note.dataset.kind = 'error'; return note; })());
         return panel;
       }
 
@@ -344,6 +415,12 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         sort.addEventListener('change', () => { f.sort = sort.value; rerender(); });
         sortField.append(sort);
 
+        const searchField = el('label', 'wm-sell-field');
+        searchField.append(el('span', '', 'Recherche (titre ou description)'));
+        const search = el('input', 'wm-sell-input'); search.type = 'search'; search.placeholder = 'Buffy, oiseau, football…'; search.value = f.query; search.dataset.role = 'sell-search';
+        search.addEventListener('input', () => { f.query = search.value; rerender(); });
+        searchField.append(search);
+
         const priceField = el('label', 'wm-sell-field');
         priceField.append(el('span', '', 'Prix moyen mini (W)'));
         const price = el('input', 'wm-sell-input'); price.type = 'text'; price.inputMode = 'decimal'; price.value = f.minPrice; price.dataset.role = 'sell-min-price';
@@ -359,7 +436,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
         ratio.value = f.minRatio;
         ratio.addEventListener('change', () => { f.minRatio = ratio.value; rerender(); });
         ratioField.append(ratio);
-        row.append(sortField, priceField, ratioField);
+        row.append(searchField, sortField, priceField, ratioField);
 
         const checks = el('div', 'wm-sell-row');
         checks.append(
@@ -465,7 +542,7 @@ html.${ROUTE_CLASS} main > :not(#${PAGE_ID}) { display: none !important; }
           nodes.push(resultsHost);
         } else {
           resultsHost = null;
-          nodes.push(el('p', 'wm-sell-note', 'Aucun prix en cache pour l’instant : lance « Charger les prix » ci-dessus.'));
+          nodes.push(el('p', 'wm-sell-note', 'Aucun prix en mémoire pour l’instant : lance « Charger les manquants » ci-dessus.'));
         }
         return nodes;
       }

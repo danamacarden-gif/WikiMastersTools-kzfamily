@@ -127,7 +127,7 @@
           const firstCards = extractCards(first);
           const total = Number(first?.total);
           const pageSize = firstCards.length;
-          const pages = [firstCards];
+          pages.push(firstCards);
 
           const hasReliableTotal = Number.isFinite(total) && total > 0 && pageSize > 0;
           const maxPageExclusive = hasReliableTotal
@@ -224,6 +224,7 @@
       }
 
       async function fetchAllCollection(requestId, selectedRarities = []) {
+        const pages = [];
         try {
           const selectedIndexes = (Array.isArray(selectedRarities) ? selectedRarities : [])
             .map((rarity) => RARITY_ORDER.indexOf(rarity))
@@ -279,7 +280,8 @@
               requestId,
               loadedPages,
               totalPages: exactTargetFromStats ? targetPages : totalPages,
-              serverTotalPages: totalPages
+              serverTotalPages: totalPages,
+              cards: firstCards
             }
           }));
 
@@ -303,7 +305,8 @@
                   requestId,
                   loadedPages,
                   totalPages: exactTargetFromStats ? targetPages : (Number.isFinite(total) ? totalPages : 0),
-                  serverTotalPages: totalPages
+                  serverTotalPages: totalPages,
+                  cards
                 }
               }));
 
@@ -343,7 +346,9 @@
             detail: {
               requestId,
               ok: false,
-              error: String(error?.message || error)
+              error: String(error?.message || error),
+              // Pages déjà lues : l'appelant peut les enregistrer malgré l'échec.
+              cards: [...dedupeCards(pages).values()]
             }
           }));
         }

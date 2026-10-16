@@ -27,6 +27,14 @@
     }
 
     // Cartes de la collection (format de l'extension) + prix -> lignes. `priceOf(id, rarity)` -> nombre | null.
+    // Minuscules, sans accents ni ponctuation : « Oiseaux » trouve « oiseau », « Buffy » trouve « buffy… ».
+    function normalizeText(value) {
+      return String(value ?? '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+        .replace(/\b([a-z0-9]{3,})s\b/g, '$1').replace(/\b([a-z0-9]{4,})x\b/g, '$1');
+    }
+
     function buildRows(cards, priceOf, familyCardIds = new Set()) {
       const families = familyCardIds instanceof Set ? familyCardIds : new Set(familyCardIds || []);
       const rows = [];
@@ -37,6 +45,7 @@
         rows.push({
           id: card.id,
           title: String(card.title),
+          description: card.description ? String(card.description) : '',
           rarity: card.rarity || null,
           imageUrl: card.imageUrl || null,
           // Un exemplaire non favori : le site vend l'exemplaire désigné ; sinon le pont en cherche un.
@@ -105,11 +114,16 @@
       const rarities = opts.rarities instanceof Set ? opts.rarities : new Set(opts.rarities || []);
       const minPrice = Number(opts.minPrice) > 0 ? Number(opts.minPrice) : 0;
       const minRatio = Number(opts.minRatio) > 0 ? Number(opts.minRatio) : 0;
+      const words = normalizeText(opts.query).split(' ').filter(Boolean);
       const counts = { unpriced: 0, protected: 0, listed: 0, belowPrice: 0, belowRatio: 0, singles: 0 };
       const items = [];
 
       for (const row of annotated) {
         if (rarities.size && !rarities.has(row.rarity)) continue;
+        if (words.length) {
+          const haystack = normalizeText(`${row.title} ${row.description || ''}`);
+          if (!words.every((word) => haystack.includes(word))) continue;
+        }
         if (row.price == null) { counts.unpriced += 1; continue; }
 
         const isProtected = row.starred || row.tagCount > 0 || row.family;
@@ -142,7 +156,7 @@
       return ids;
     }
 
-    return { RARITY_ORDER, MIN_SAMPLE, SORTS, median, buildRows, rarityStats, annotate, select, sellingCardIds };
+    return { RARITY_ORDER, MIN_SAMPLE, SORTS, median, normalizeText, buildRows, rarityStats, annotate, select, sellingCardIds };
   }
 
   if (registry) registry.sellIdeasLogic = { create };

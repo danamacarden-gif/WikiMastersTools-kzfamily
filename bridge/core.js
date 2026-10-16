@@ -53,6 +53,8 @@
           rarity: card?.rarity || null,
           imageUrl: card?.image_url || null,
           wikipediaUrl: card?.wikipedia_url || null,
+          // Description courte de la carte (nom du champ non garanti côté site) : sert à la recherche.
+          description: String(card?.description || card?.wikipedia_description || card?.short_description || card?.wikipedia_extract || card?.extract || card?.summary || '').slice(0, 240) || null,
           count: Number(entry?.count) || 1,
           starred: entry?.starred === true,
           tags: mapTags(entry?.tags)

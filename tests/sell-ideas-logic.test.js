@@ -93,3 +93,20 @@ test('ownedCardId : premier exemplaire, null si favori', () => {
   ], () => 5);
   assert.deepEqual(rows.map((r) => r.ownedCardId), ['x1', null, null]);
 });
+
+test('select : recherche titre + description, sans accents ni pluriel', () => {
+  const logic = require('../features/sell-ideas-logic.js').create();
+  const rows = logic.annotate(logic.buildRows([
+    { id: 'a', title: 'Le Choix de Buffy', description: 'épisode de la série Buffy contre les vampires', rarity: 'C', count: 2, ownedCardIds: ['1', '2'] },
+    { id: 'b', title: 'Mésange', description: 'espèce d’oiseaux', rarity: 'C', count: 2, ownedCardIds: ['3', '4'] },
+    { id: 'c', title: 'Chat', description: '', rarity: 'C', count: 2, ownedCardIds: ['5', '6'] }
+  ], () => 10), {});
+  const find = (query) => logic.select(rows, { query, hideProtected: false, duplicatesOnly: true }).items.map((i) => i.id);
+  assert.deepEqual(find('buffy'), ['a']);
+  assert.deepEqual(find('OISEAU'), ['b']);
+  assert.deepEqual(find('oiseaux'), ['b']);
+  assert.deepEqual(find('serie vampires'), ['a']);
+  assert.deepEqual(find('mesange'), ['b'], 'sans accents');
+  assert.deepEqual(find('xyz'), []);
+  assert.equal(find('').length, 3);
+});
